@@ -72,16 +72,10 @@ export function createCheckoutTools(dependencies: CheckoutToolDependencies): Che
 		name: "set_checkout_contact",
 		title: "Set checkout contact and shipping address",
 		description:
-			"Set the guest email and shipping address on the active Saleor checkout. Use a fresh operationId for a new intent and reuse it only when retrying the exact same change.",
+			"Set the guest email and shipping address on the active Saleor checkout. Repeating the same values is safe.",
 		inputSchema: {
 			type: "object",
 			properties: {
-				operationId: {
-					type: "string",
-					minLength: 8,
-					maxLength: 64,
-					description: "A stable unique ID for this exact contact-update intent; reuse it only for retries.",
-				},
 				email: {
 					type: "string",
 					minLength: 3,
@@ -143,7 +137,6 @@ export function createCheckoutTools(dependencies: CheckoutToolDependencies): Che
 				},
 			},
 			required: [
-				"operationId",
 				"email",
 				"firstName",
 				"lastName",
@@ -156,22 +149,6 @@ export function createCheckoutTools(dependencies: CheckoutToolDependencies): Che
 			additionalProperties: false,
 		},
 		authorize: requireActiveCheckout,
-		idempotency: {
-			store: idempotencyStore,
-			key: ({ input, context }) =>
-				`${context.checkoutId}:${input.operationId}:contact:${JSON.stringify([
-					input.email,
-					input.firstName,
-					input.lastName,
-					input.streetAddress1,
-					input.streetAddress2 ?? "",
-					input.city,
-					input.countryArea,
-					input.postalCode,
-					input.countryCode,
-					input.phone ?? "",
-				])}`,
-		},
 		execute: async (input) => {
 			const active = requireCheckout(checkoutState.read());
 			const emailResult = await operations.updateEmail(active.id, input.email);
@@ -226,13 +203,6 @@ export function createCheckoutTools(dependencies: CheckoutToolDependencies): Che
 		inputSchema: {
 			type: "object",
 			properties: {
-				operationId: {
-					type: "string",
-					minLength: 8,
-					maxLength: 64,
-					description:
-						"A stable unique ID for this exact delivery-selection intent; reuse it only for retries.",
-				},
 				deliveryId: {
 					type: "string",
 					minLength: 1,
@@ -240,14 +210,10 @@ export function createCheckoutTools(dependencies: CheckoutToolDependencies): Che
 					description: "A delivery ID returned by list_delivery_options for the active checkout.",
 				},
 			},
-			required: ["operationId", "deliveryId"],
+			required: ["deliveryId"],
 			additionalProperties: false,
 		},
 		authorize: requireActiveCheckout,
-		idempotency: {
-			store: idempotencyStore,
-			key: ({ input, context }) => `${context.checkoutId}:${input.operationId}:delivery:${input.deliveryId}`,
-		},
 		execute: async ({ deliveryId }) => {
 			const active = requireCheckout(checkoutState.read());
 			const result = await operations.updateDeliveryMethod(active.id, deliveryId);

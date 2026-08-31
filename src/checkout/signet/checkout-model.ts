@@ -14,7 +14,6 @@ export type CheckoutContext = {
 };
 
 export type ContactInput = {
-	operationId: string;
 	email: string;
 	firstName: string;
 	lastName: string;
@@ -28,7 +27,6 @@ export type ContactInput = {
 };
 
 export type DeliveryInput = {
-	operationId: string;
 	deliveryId: string;
 };
 

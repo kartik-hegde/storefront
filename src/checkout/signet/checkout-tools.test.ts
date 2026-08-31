@@ -52,6 +52,7 @@ function setup(
 		liveCheckout?: ServerCheckout;
 		lostResponse?: boolean;
 		getOrderProof?: ReturnType<typeof vi.fn>;
+		updateEmail?: ReturnType<typeof vi.fn>;
 	} = {},
 ) {
 	const initial = checkout();
@@ -80,7 +81,7 @@ function setup(
 		})),
 		updateBillingAddress: vi.fn(async () => ({ ok: true })),
 		updateDeliveryMethod: vi.fn(async () => ({ ok: true, checkout: initial })),
-		updateEmail: vi.fn(async () => ({ ok: true, checkout: initial })),
+		updateEmail: options.updateEmail ?? vi.fn(async () => ({ ok: true, checkout: initial })),
 		updateShippingAddress: vi.fn(async () => ({ ok: true, checkout: initial })),
 	} as unknown as CheckoutOperations;
 	const idempotencyStore = options.idempotencyStore ?? new MemoryIdempotencyStore();
@@ -123,6 +124,23 @@ async function harnessFor(placeOrder: ReturnType<typeof setup>["tools"]["placeOr
 	return harness;
 }
 
+async function harnessForContact(contact: ReturnType<typeof setup>["tools"]["contact"]) {
+	const harness = createWebMcpTestHarness();
+	const signet = createSignet({
+		modelContext: harness.modelContext,
+		context: () => ({
+			checkoutId: "checkout-1",
+			channel: "default-channel",
+			email: "ada@example.com",
+			lineCount: 1,
+			totalAmount: 20,
+			currency: "USD",
+		}),
+	});
+	await signet.expose(contact);
+	return harness;
+}
+
 describe("Saleor Signet checkout tools", () => {
 	it("keeps all five production tools agent-ready", () => {
 		const { tools } = setup();
@@ -130,6 +148,31 @@ describe("Saleor Signet checkout tools", () => {
 		for (const tool of Object.values(tools)) {
 			expect(() => assertToolReady(tool)).not.toThrow();
 		}
+	});
+
+	it("leaves a rejected contact update directly retryable", async () => {
+		const updateEmail = vi
+			.fn()
+			.mockResolvedValueOnce({ ok: false, error: "Saleor rejected the checkout email." })
+			.mockResolvedValue({ ok: true, checkout: checkout() });
+		const { tools } = setup({ updateEmail });
+		const harness = await harnessForContact(tools.contact);
+		const input = {
+			email: "ada@example.com",
+			firstName: "Ada",
+			lastName: "Lovelace",
+			streetAddress1: "1 Analytical Engine Way",
+			city: "London",
+			countryArea: "London",
+			postalCode: "SW1A 1AA",
+			countryCode: "GB",
+		};
+
+		await expect(harness.invoke("set_checkout_contact", input)).rejects.toThrow(
+			"Saleor rejected the checkout email.",
+		);
+		await expect(harness.invoke("set_checkout_contact", input)).resolves.toBeDefined();
+		expect(updateEmail).toHaveBeenCalledTimes(2);
 	});
 
 	it("places one order and replays the result for the same intent", async () => {
