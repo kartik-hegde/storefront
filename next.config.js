@@ -1,5 +1,7 @@
 /** @type {import('next').NextConfig} */
 import createNextIntlPlugin from "next-intl/plugin";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { paperCacheLifeProfiles } from "./src/lib/cache-life-profiles.data.mjs";
 import {
 	PUBLIC_ASSET_CACHE_CONTROL,
@@ -12,6 +14,7 @@ const allowedDevOrigins = process.env.ALLOWED_DEV_ORIGINS?.split(",")
 	.filter(Boolean);
 
 const isDevelopment = process.env.NODE_ENV === "development";
+const projectDirectory = path.dirname(fileURLToPath(import.meta.url));
 
 /** Host of the configured Saleor instance — self-hosted deploys serve media from it. */
 function saleorApiHostname() {
@@ -63,6 +66,13 @@ const config = {
 	// Enables mixing static, cached, and dynamic content in a single route.
 	// See: https://nextjs.org/docs/app/getting-started/cache-components
 	cacheComponents: true,
+
+	// The Signet demo consumes the locally built package from the adjacent repository.
+	// Turbopack otherwise treats the storefront directory as a hard filesystem boundary.
+	turbopack: {
+		root: path.resolve(projectDirectory, ".."),
+	},
+	transpilePackages: ["@signet/webmcp"],
 
 	// Next.js 16.3 — prefetch one reusable loading shell per route (not per link).
 	// See: https://nextjs.org/blog/next-16-3-instant-navigations
