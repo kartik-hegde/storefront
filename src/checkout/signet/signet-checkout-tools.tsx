@@ -4,13 +4,14 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { createSignet, type GuardEvent, WebStorageOperationJournal } from "@signet/webmcp";
 import { useSignetTool } from "@signet/webmcp/react";
+import { IndexedDbIdempotencyStore } from "@signet/webmcp/stores";
 
 import { useCheckoutGatewayMessages } from "@/checkout/hooks/use-checkout-gateway-messages";
 import { useCheckoutData } from "@/checkout/providers/checkout-data";
 
 import { CheckoutSnapshot, checkoutContext, LOST_RESPONSE_FAULT } from "./checkout-model";
+import { checkoutOperations } from "./checkout-operations";
 import { createCheckoutTools } from "./checkout-tools";
-import { IndexedDbIdempotencyStore } from "./indexed-db-idempotency-store";
 import { type ApprovalRequest, SignetDemoPanel } from "./signet-demo-panel";
 
 export function SignetCheckoutTools() {
@@ -67,13 +68,19 @@ export function SignetCheckoutTools() {
 		() =>
 			createCheckoutTools({
 				checkoutState,
+				consumeLostResponseFault: () => {
+					if (sessionStorage.getItem(LOST_RESPONSE_FAULT) !== "armed") return false;
+					sessionStorage.removeItem(LOST_RESPONSE_FAULT);
+					setFaultArmed(false);
+					return true;
+				},
 				refreshCheckout,
 				setCheckout,
 				gatewayMessages,
 				idempotencyStore,
 				operationJournal,
+				operations: checkoutOperations,
 				requestApproval,
-				onFaultConsumed: () => setFaultArmed(false),
 			}),
 		[
 			checkoutState,

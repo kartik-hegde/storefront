@@ -1,17 +1,6 @@
 import type { IdempotencyStore, OperationJournal, SignetTool } from "@signet/webmcp";
 
-import {
-	calculateDeliveryOptions,
-	executeSignetLegacyDummyPayment,
-	getSignetOrderProof,
-	updateCheckoutBillingAddress,
-	updateCheckoutDeliveryMethod,
-	updateCheckoutEmail,
-	updateCheckoutShippingAddress,
-	type SignetOrderProof,
-} from "@/app/(checkout)/actions";
 import type { CheckoutGatewayMessagesHook } from "@/checkout/hooks/use-checkout-gateway-messages";
-import { executePayment, resolvePaymentProvider } from "@/checkout/lib/payment";
 import { getCheckoutPayAmount, getCheckoutPayCurrency } from "@/checkout/lib/payment/checkout-pay-amount";
 import type { CheckoutDataContextValue } from "@/checkout/providers/checkout-data";
 
@@ -21,26 +10,27 @@ import {
 	type CheckoutSnapshot,
 	type ContactInput,
 	type DeliveryInput,
-	LOST_RESPONSE_FAULT,
 	nearlyEqual,
 	type PlaceOrderInput,
 	requireCheckout,
 	shippingAddressInput,
 	toAddressInput,
 } from "./checkout-model";
+import type { CheckoutOperations, CheckoutOrderProof } from "./checkout-operations";
 
-type OrderResult = SignetOrderProof & { status: "placed" };
+type OrderResult = CheckoutOrderProof & { status: "placed" };
 type OrderCorrelation = { phase: "payment_started" } | { phase: "order_created"; orderId: string };
 
-type ToolDependencies = {
+export type CheckoutToolDependencies = {
 	checkoutState: CheckoutSnapshot;
 	refreshCheckout: CheckoutDataContextValue["refreshCheckout"];
 	setCheckout: CheckoutDataContextValue["setCheckout"];
 	gatewayMessages: CheckoutGatewayMessagesHook;
 	idempotencyStore: IdempotencyStore;
 	operationJournal: OperationJournal;
+	operations: CheckoutOperations;
 	requestApproval(title: string, detail: string): Promise<boolean>;
-	onFaultConsumed(): void;
+	consumeLostResponseFault(): boolean;
 };
 
 export type CheckoutToolSet = {
@@ -55,13 +45,14 @@ export type CheckoutToolSet = {
 	placeOrder: SignetTool<PlaceOrderInput, OrderResult, CheckoutContext>;
 };
 
-export function createCheckoutTools(dependencies: ToolDependencies): CheckoutToolSet {
+export function createCheckoutTools(dependencies: CheckoutToolDependencies): CheckoutToolSet {
 	const {
 		checkoutState,
+		consumeLostResponseFault,
 		gatewayMessages,
 		idempotencyStore,
-		onFaultConsumed,
 		operationJournal,
+		operations,
 		refreshCheckout,
 		requestApproval,
 		setCheckout,
@@ -85,17 +76,71 @@ export function createCheckoutTools(dependencies: ToolDependencies): CheckoutToo
 		inputSchema: {
 			type: "object",
 			properties: {
-				operationId: { type: "string", minLength: 8 },
-				email: { type: "string", minLength: 3 },
-				firstName: { type: "string", minLength: 1 },
-				lastName: { type: "string", minLength: 1 },
-				streetAddress1: { type: "string", minLength: 1 },
-				streetAddress2: { type: "string" },
-				city: { type: "string", minLength: 1 },
-				countryArea: { type: "string", minLength: 1 },
-				postalCode: { type: "string", minLength: 1 },
-				countryCode: { type: "string", pattern: "^[A-Z]{2}$" },
-				phone: { type: "string" },
+				operationId: {
+					type: "string",
+					minLength: 8,
+					maxLength: 64,
+					description: "A stable unique ID for this exact contact-update intent; reuse it only for retries.",
+				},
+				email: {
+					type: "string",
+					minLength: 3,
+					maxLength: 254,
+					description: "The shopper email address to attach to the guest checkout.",
+				},
+				firstName: {
+					type: "string",
+					minLength: 1,
+					maxLength: 100,
+					description: "The shipping recipient's first name.",
+				},
+				lastName: {
+					type: "string",
+					minLength: 1,
+					maxLength: 100,
+					description: "The shipping recipient's last name.",
+				},
+				streetAddress1: {
+					type: "string",
+					minLength: 1,
+					maxLength: 200,
+					description: "The primary street-address line for shipping.",
+				},
+				streetAddress2: {
+					type: "string",
+					maxLength: 200,
+					description: "An optional apartment, suite, unit, or secondary address line.",
+				},
+				city: {
+					type: "string",
+					minLength: 1,
+					maxLength: 100,
+					description: "The shipping city or locality.",
+				},
+				countryArea: {
+					type: "string",
+					minLength: 1,
+					maxLength: 100,
+					description: "The shipping state, province, or region.",
+				},
+				postalCode: {
+					type: "string",
+					minLength: 1,
+					maxLength: 32,
+					description: "The shipping postal or ZIP code.",
+				},
+				countryCode: {
+					type: "string",
+					minLength: 2,
+					maxLength: 2,
+					pattern: "^[A-Z]{2}$",
+					description: "The two-letter uppercase ISO 3166-1 shipping country code.",
+				},
+				phone: {
+					type: "string",
+					maxLength: 32,
+					description: "An optional recipient phone number including country code.",
+				},
 			},
 			required: [
 				"operationId",
@@ -129,10 +174,10 @@ export function createCheckoutTools(dependencies: ToolDependencies): CheckoutToo
 		},
 		execute: async (input) => {
 			const active = requireCheckout(checkoutState.read());
-			const emailResult = await updateCheckoutEmail(active.id, input.email);
+			const emailResult = await operations.updateEmail(active.id, input.email);
 			if (!emailResult.ok) throw new Error(emailResult.error ?? "Saleor rejected the checkout email.");
 
-			const addressResult = await updateCheckoutShippingAddress(active.id, toAddressInput(input), false);
+			const addressResult = await operations.updateShippingAddress(active.id, toAddressInput(input), false);
 			if (!addressResult.ok) {
 				throw new Error(addressResult.error ?? "Saleor rejected the shipping address.");
 			}
@@ -158,7 +203,7 @@ export function createCheckoutTools(dependencies: ToolDependencies): CheckoutToo
 		annotations: { readOnlyHint: true },
 		execute: async () => {
 			const active = requireCheckout(checkoutState.read());
-			const result = await calculateDeliveryOptions(active.id);
+			const result = await operations.calculateDeliveryOptions(active.id);
 			if (!result.ok) throw new Error(result.error ?? "Saleor could not calculate delivery options.");
 			return {
 				deliveries: result.deliveries.map((delivery) => ({
@@ -181,8 +226,19 @@ export function createCheckoutTools(dependencies: ToolDependencies): CheckoutToo
 		inputSchema: {
 			type: "object",
 			properties: {
-				operationId: { type: "string", minLength: 8 },
-				deliveryId: { type: "string", minLength: 1 },
+				operationId: {
+					type: "string",
+					minLength: 8,
+					maxLength: 64,
+					description:
+						"A stable unique ID for this exact delivery-selection intent; reuse it only for retries.",
+				},
+				deliveryId: {
+					type: "string",
+					minLength: 1,
+					maxLength: 512,
+					description: "A delivery ID returned by list_delivery_options for the active checkout.",
+				},
 			},
 			required: ["operationId", "deliveryId"],
 			additionalProperties: false,
@@ -194,7 +250,7 @@ export function createCheckoutTools(dependencies: ToolDependencies): CheckoutToo
 		},
 		execute: async ({ deliveryId }) => {
 			const active = requireCheckout(checkoutState.read());
-			const result = await updateCheckoutDeliveryMethod(active.id, deliveryId);
+			const result = await operations.updateDeliveryMethod(active.id, deliveryId);
 			if (!result.ok) throw new Error(result.error ?? "Saleor rejected the delivery option.");
 			return await refreshAndAdopt(refreshCheckout, setCheckout);
 		},
@@ -212,9 +268,24 @@ export function createCheckoutTools(dependencies: ToolDependencies): CheckoutToo
 		inputSchema: {
 			type: "object",
 			properties: {
-				operationId: { type: "string", minLength: 8 },
-				expectedTotalAmount: { type: "number", minimum: 0 },
-				expectedCurrency: { type: "string", pattern: "^[A-Z]{3}$" },
+				operationId: {
+					type: "string",
+					minLength: 8,
+					maxLength: 64,
+					description: "A stable unique ID for this exact order-placement intent; reuse it only for retries.",
+				},
+				expectedTotalAmount: {
+					type: "number",
+					minimum: 0,
+					description: "The exact checkout total observed from inspect_checkout before requesting approval.",
+				},
+				expectedCurrency: {
+					type: "string",
+					minLength: 3,
+					maxLength: 3,
+					pattern: "^[A-Z]{3}$",
+					description: "The three-letter uppercase currency code observed from inspect_checkout.",
+				},
 			},
 			required: ["operationId", "expectedTotalAmount", "expectedCurrency"],
 			additionalProperties: false,
@@ -253,19 +324,23 @@ export function createCheckoutTools(dependencies: ToolDependencies): CheckoutToo
 				throw new Error("Select a delivery option before placing the order.");
 			}
 
-			const billingResult = await updateCheckoutBillingAddress({
+			const billingResult = await operations.updateBillingAddress({
 				checkoutId: active.id,
 				billingAddress,
 				saveAddress: false,
 			});
 			if (!billingResult.ok) throw new Error(billingResult.error ?? "Saleor rejected the billing address.");
 
-			const paymentProvider = resolvePaymentProvider(fresh.availablePaymentGateways);
+			const paymentProvider = operations.resolvePaymentProvider(fresh.availablePaymentGateways);
 			await operation?.write<OrderCorrelation>({ phase: "payment_started" });
 			const paymentResult =
 				paymentProvider.type === "dummy" && paymentProvider.gateway.id === "mirumee.payments.dummy"
-					? await executeSignetLegacyDummyPayment(fresh.id, amount)
-					: await executePayment(paymentProvider, { checkoutId: fresh.id, amount }, gatewayMessages);
+					? await operations.executeLegacyDummyPayment(fresh.id, amount)
+					: await operations.executePayment(
+							paymentProvider,
+							{ checkoutId: fresh.id, amount },
+							gatewayMessages,
+						);
 			if (!paymentResult.ok) {
 				await operation?.remove();
 				throw new Error(paymentResult.error);
@@ -275,13 +350,11 @@ export function createCheckoutTools(dependencies: ToolDependencies): CheckoutToo
 				phase: "order_created",
 				orderId: paymentResult.orderId,
 			});
-			if (sessionStorage.getItem(LOST_RESPONSE_FAULT) === "armed") {
-				sessionStorage.removeItem(LOST_RESPONSE_FAULT);
-				onFaultConsumed();
+			if (consumeLostResponseFault()) {
 				throw new Error("Injected lost response after Saleor committed the order.");
 			}
 
-			const proof = await getSignetOrderProof(paymentResult.orderId);
+			const proof = await operations.getOrderProof(paymentResult.orderId);
 			if (!proof) throw new Error("The order response arrived but authoritative verification failed.");
 			return { ...proof, status: "placed" };
 		},
@@ -295,7 +368,7 @@ export function createCheckoutTools(dependencies: ToolDependencies): CheckoutToo
 					reason: "Payment started, but no Saleor order ID was recorded.",
 				};
 			}
-			const proof = await getSignetOrderProof(correlation.orderId);
+			const proof = await operations.getOrderProof(correlation.orderId);
 			return proof
 				? { recovered: true, output: { ...proof, status: "placed" } }
 				: {
@@ -305,7 +378,7 @@ export function createCheckoutTools(dependencies: ToolDependencies): CheckoutToo
 					};
 		},
 		verify: async ({ input, output, context }) => {
-			const proof = await getSignetOrderProof(output.orderId);
+			const proof = await operations.getOrderProof(output.orderId);
 			return (
 				proof?.isPaid === true &&
 				proof.email === context.email &&
