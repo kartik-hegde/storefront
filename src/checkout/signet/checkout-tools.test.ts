@@ -50,12 +50,13 @@ function setup(
 		lostResponse?: boolean;
 		getOrderProof?: ReturnType<typeof vi.fn>;
 		updateEmail?: ReturnType<typeof vi.fn>;
+		paymentResult?: { ok: true; orderId: string } | { ok: false; error: string };
 	} = {},
 ) {
 	const initial = checkout();
 	const checkoutState = new CheckoutSnapshot();
 	checkoutState.update(initial);
-	const payment = vi.fn(async () => ({ ok: true as const, orderId: "order-1" }));
+	const payment = vi.fn(async () => options.paymentResult ?? { ok: true as const, orderId: "order-1" });
 	const proof = {
 		orderId: "order-1",
 		number: "1001",
@@ -84,6 +85,7 @@ function setup(
 	const idempotencyStore = options.idempotencyStore ?? new MemoryIdempotencyStore();
 	const journal = options.journal ?? new MemoryOperationJournal();
 	const onVerifiedOrder = vi.fn();
+	const onOrderAttemptFailed = vi.fn();
 	let lostResponse = options.lostResponse ?? false;
 	const confirm = vi.fn(async () => true);
 	const tools = createCheckoutTools({
@@ -97,13 +99,23 @@ function setup(
 		idempotencyStore,
 		operationJournal: journal,
 		onVerifiedOrder,
+		onOrderAttemptFailed,
 		operations,
 		refreshCheckout: vi.fn(async () => options.liveCheckout ?? initial),
 		requestApproval: confirm,
 		setCheckout: (value) => checkoutState.update(value),
 	});
 
-	return { confirm, getOrderProof, idempotencyStore, journal, onVerifiedOrder, payment, tools };
+	return {
+		confirm,
+		getOrderProof,
+		idempotencyStore,
+		journal,
+		onOrderAttemptFailed,
+		onVerifiedOrder,
+		payment,
+		tools,
+	};
 }
 
 async function harnessFor(placeOrder: ReturnType<typeof setup>["tools"]["placeOrder"]) {
@@ -307,6 +319,20 @@ describe("Saleor Signett checkout tools", () => {
 		);
 		expect(payment).not.toHaveBeenCalled();
 		expect(confirm).toHaveBeenCalledTimes(2);
+	});
+
+	it("cancels an armed response-loss simulation when payment fails before order creation", async () => {
+		const { onOrderAttemptFailed, tools } = setup({
+			lostResponse: true,
+			paymentResult: { ok: false, error: "Payment app unavailable" },
+		});
+		const harness = await harnessFor(tools.placeOrder);
+
+		await expect(harness.invoke("place_order", orderInput)).rejects.toMatchObject({
+			code: "payment_provider_unavailable",
+			retry: "after_repair",
+		});
+		expect(onOrderAttemptFailed).toHaveBeenCalledOnce();
 	});
 
 	it("rejects invented arguments before any application action", async () => {

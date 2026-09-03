@@ -1,4 +1,4 @@
-import type { IdempotencyStore, OperationJournal, SignettTool } from "signett";
+import { ToolError, type IdempotencyStore, type OperationJournal, type SignettTool } from "signett";
 
 import type { CheckoutGatewayMessagesHook } from "@/checkout/hooks/use-checkout-gateway-messages";
 import { getCheckoutPayAmount, getCheckoutPayCurrency } from "@/checkout/lib/payment/checkout-pay-amount";
@@ -31,6 +31,7 @@ export type CheckoutToolDependencies = {
 	operations: CheckoutOperations;
 	requestApproval(title: string, detail: string): Promise<boolean>;
 	consumeLostResponseFault(): boolean;
+	onOrderAttemptFailed?(): void;
 	onVerifiedOrder?(proof: CheckoutOrderProof): void;
 };
 
@@ -54,6 +55,7 @@ export function createCheckoutTools(dependencies: CheckoutToolDependencies): Che
 		idempotencyStore,
 		operationJournal,
 		onVerifiedOrder,
+		onOrderAttemptFailed,
 		operations,
 		refreshCheckout,
 		requestApproval,
@@ -273,58 +275,76 @@ export function createCheckoutTools(dependencies: CheckoutToolDependencies): Che
 		},
 		journal: { store: operationJournal },
 		execute: async (input, { operation }) => {
-			const active = requireCheckout(checkoutState.read());
-			const fresh = await refreshCheckout({ updateState: false });
-			if (!fresh) throw new Error("Saleor could not refresh the checkout before payment.");
+			let responseLossTriggered = false;
+			try {
+				const active = requireCheckout(checkoutState.read());
+				const fresh = await refreshCheckout({ updateState: false });
+				if (!fresh) throw new Error("Saleor could not refresh the checkout before payment.");
 
-			const amount = getCheckoutPayAmount(fresh);
-			const currency = getCheckoutPayCurrency(fresh);
-			if (amount === null || currency === null) throw new Error("The live Saleor total is unavailable.");
-			if (!nearlyEqual(amount, input.expectedTotalAmount) || currency !== input.expectedCurrency) {
-				throw new Error(
-					`Checkout total changed to ${currency} ${amount.toFixed(2)}; approval is required again.`,
-				);
+				const amount = getCheckoutPayAmount(fresh);
+				const currency = getCheckoutPayCurrency(fresh);
+				if (amount === null || currency === null) throw new Error("The live Saleor total is unavailable.");
+				if (!nearlyEqual(amount, input.expectedTotalAmount) || currency !== input.expectedCurrency) {
+					throw new Error(
+						`Checkout total changed to ${currency} ${amount.toFixed(2)}; approval is required again.`,
+					);
+				}
+
+				const billingAddress = shippingAddressInput(fresh);
+				if (!billingAddress) throw new Error("Set a shipping address before placing the order.");
+				if (!fresh.delivery && fresh.isShippingRequired) {
+					throw new Error("Select a delivery option before placing the order.");
+				}
+
+				const billingResult = await operations.updateBillingAddress({
+					checkoutId: active.id,
+					billingAddress,
+					saveAddress: false,
+				});
+				if (!billingResult.ok) {
+					throw new Error(billingResult.error ?? "Saleor rejected the billing address.");
+				}
+
+				const paymentProvider = operations.resolvePaymentProvider(fresh.availablePaymentGateways);
+				await operation?.write<OrderCorrelation>({ phase: "payment_started" });
+				const paymentResult =
+					paymentProvider.type === "dummy" && paymentProvider.gateway.id === "mirumee.payments.dummy"
+						? await operations.executeLegacyDummyPayment(fresh.id, amount)
+						: await operations.executePayment(
+								paymentProvider,
+								{ checkoutId: fresh.id, amount },
+								gatewayMessages,
+							);
+				if (!paymentResult.ok) {
+					await operation?.remove();
+					throw new ToolError({
+						code: "payment_provider_unavailable",
+						message: paymentResult.error,
+						retry: "after_repair",
+						repair: {
+							action: "stop",
+							instruction:
+								"The Saleor payment provider rejected this attempt. Do not retry or request approval again until the provider is healthy.",
+						},
+					});
+				}
+
+				await operation?.write<OrderCorrelation>({
+					phase: "order_created",
+					orderId: paymentResult.orderId,
+				});
+				if (consumeLostResponseFault()) {
+					responseLossTriggered = true;
+					throw new Error("Injected lost response after Saleor committed the order.");
+				}
+
+				const proof = await operations.getOrderProof(paymentResult.orderId);
+				if (!proof) throw new Error("The order response arrived but authoritative verification failed.");
+				return { ...proof, status: "placed" };
+			} catch (error) {
+				if (!responseLossTriggered) onOrderAttemptFailed?.();
+				throw error;
 			}
-
-			const billingAddress = shippingAddressInput(fresh);
-			if (!billingAddress) throw new Error("Set a shipping address before placing the order.");
-			if (!fresh.delivery && fresh.isShippingRequired) {
-				throw new Error("Select a delivery option before placing the order.");
-			}
-
-			const billingResult = await operations.updateBillingAddress({
-				checkoutId: active.id,
-				billingAddress,
-				saveAddress: false,
-			});
-			if (!billingResult.ok) throw new Error(billingResult.error ?? "Saleor rejected the billing address.");
-
-			const paymentProvider = operations.resolvePaymentProvider(fresh.availablePaymentGateways);
-			await operation?.write<OrderCorrelation>({ phase: "payment_started" });
-			const paymentResult =
-				paymentProvider.type === "dummy" && paymentProvider.gateway.id === "mirumee.payments.dummy"
-					? await operations.executeLegacyDummyPayment(fresh.id, amount)
-					: await operations.executePayment(
-							paymentProvider,
-							{ checkoutId: fresh.id, amount },
-							gatewayMessages,
-						);
-			if (!paymentResult.ok) {
-				await operation?.remove();
-				throw new Error(paymentResult.error);
-			}
-
-			await operation?.write<OrderCorrelation>({
-				phase: "order_created",
-				orderId: paymentResult.orderId,
-			});
-			if (consumeLostResponseFault()) {
-				throw new Error("Injected lost response after Saleor committed the order.");
-			}
-
-			const proof = await operations.getOrderProof(paymentResult.orderId);
-			if (!proof) throw new Error("The order response arrived but authoritative verification failed.");
-			return { ...proof, status: "placed" };
 		},
 		recover: async ({ operation }) => {
 			const correlation = await operation?.read<OrderCorrelation>();

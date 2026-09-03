@@ -11,7 +11,13 @@ import { useCheckoutGatewayMessages } from "@/checkout/hooks/use-checkout-gatewa
 import { navigateToOrderConfirmation } from "@/checkout/lib/payment/navigate-to-order";
 import { useCheckoutData } from "@/checkout/providers/checkout-data";
 
-import { CheckoutSnapshot, checkoutContext, LOST_RESPONSE_FAULT } from "./checkout-model";
+import {
+	CheckoutSnapshot,
+	checkoutContext,
+	LOST_RESPONSE_FAULT,
+	ResponseLossSimulation,
+	type ResponseLossSimulationState,
+} from "./checkout-model";
 import { checkoutOperations, type CheckoutOrderProof } from "./checkout-operations";
 import { createCheckoutTools } from "./checkout-tools";
 import { type ApprovalRequest, SignetDemoPanel } from "./signet-demo-panel";
@@ -25,10 +31,23 @@ export function SignetCheckoutTools() {
 	const [events, setEvents] = useState<GuardEvent[]>([]);
 	const [proof, setProof] = useState({ recovered: false, replayed: false });
 	const [approval, setApproval] = useState<ApprovalRequest | null>(null);
-	const [faultArmed, setFaultArmed] = useState(false);
+	const [simulationState, setSimulationState] = useState<ResponseLossSimulationState>("ready");
+	const simulation = useMemo(() => new ResponseLossSimulation(), []);
 	const [verifiedOrder, setVerifiedOrder] = useState<CheckoutOrderProof | null>(null);
 	const [traces, setTraces] = useState<readonly InvocationTrace[]>([]);
 	const traceAssembler = useMemo(() => new TraceAssembler({ maxInvocations: 12 }), []);
+	const updateSimulationState = useCallback(
+		(state: ResponseLossSimulationState) => {
+			simulation.update(state);
+			setSimulationState(state);
+		},
+		[simulation],
+	);
+	useEffect(() => {
+		// An armed fault belongs to one visible page run. Do not surprise a later
+		// checkout after refresh with a fault from an abandoned attempt.
+		sessionStorage.removeItem(LOST_RESPONSE_FAULT);
+	}, []);
 
 	const idempotencyStore = useMemo(() => new IndexedDbIdempotencyStore(), []);
 	const operationJournal = useMemo(
@@ -51,12 +70,14 @@ export function SignetCheckoutTools() {
 			setEvents((current) => [event, ...current].slice(0, 12));
 			if (event.stage === "recovered") {
 				setProof((current) => ({ ...current, recovered: true }));
+				if (simulation.read() === "triggered") updateSimulationState("recovered");
 			}
 			if (event.stage === "replayed") {
 				setProof((current) => ({ ...current, replayed: true }));
+				if (simulation.read() === "triggered") updateSimulationState("recovered");
 			}
 		},
-		[traceAssembler],
+		[simulation, traceAssembler, updateSimulationState],
 	);
 
 	const signett = useMemo(
@@ -81,8 +102,13 @@ export function SignetCheckoutTools() {
 				consumeLostResponseFault: () => {
 					if (sessionStorage.getItem(LOST_RESPONSE_FAULT) !== "armed") return false;
 					sessionStorage.removeItem(LOST_RESPONSE_FAULT);
-					setFaultArmed(false);
+					updateSimulationState("triggered");
 					return true;
+				},
+				onOrderAttemptFailed: () => {
+					if (simulation.read() !== "armed") return;
+					sessionStorage.removeItem(LOST_RESPONSE_FAULT);
+					updateSimulationState("ready");
 				},
 				refreshCheckout,
 				setCheckout,
@@ -101,6 +127,8 @@ export function SignetCheckoutTools() {
 			refreshCheckout,
 			requestApproval,
 			setCheckout,
+			simulation,
+			updateSimulationState,
 		],
 	);
 
@@ -120,10 +148,16 @@ export function SignetCheckoutTools() {
 		});
 	}, []);
 
-	const armFault = useCallback(() => {
+	const toggleSimulation = useCallback(() => {
+		if (simulation.read() === "armed") {
+			sessionStorage.removeItem(LOST_RESPONSE_FAULT);
+			updateSimulationState("ready");
+			return;
+		}
 		sessionStorage.setItem(LOST_RESPONSE_FAULT, "armed");
-		setFaultArmed(true);
-	}, []);
+		setProof({ recovered: false, replayed: false });
+		updateSimulationState("armed");
+	}, [simulation, updateSimulationState]);
 
 	if (process.env.NEXT_PUBLIC_SIGNETT_DEMO !== "true") return null;
 
@@ -132,13 +166,13 @@ export function SignetCheckoutTools() {
 			approval={approval}
 			activity={orderActivity.latest}
 			events={events}
-			faultArmed={faultArmed}
 			proof={proof}
 			registeredCount={registrations.filter(({ status }) => status === "registered").length}
+			simulationState={simulationState}
 			traces={traces}
 			verifiedOrder={verifiedOrder}
-			onArmFault={armFault}
 			onApproval={decideApproval}
+			onToggleSimulation={toggleSimulation}
 			onViewOrder={() => {
 				if (verifiedOrder) navigateToOrderConfirmation(verifiedOrder.orderId);
 			}}

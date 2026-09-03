@@ -18,6 +18,7 @@ import {
 
 import { cn } from "@/lib/utils";
 
+import type { ResponseLossSimulationState } from "./checkout-model";
 import type { CheckoutOrderProof } from "./checkout-operations";
 import { SignettTelemetryView } from "./signet-telemetry-view";
 
@@ -31,13 +32,13 @@ type SignetDemoPanelProps = {
 	approval: ApprovalRequest | null;
 	activity: SignettActivity | undefined;
 	events: GuardEvent[];
-	faultArmed: boolean;
 	proof: { recovered: boolean; replayed: boolean };
 	registeredCount: number;
+	simulationState: ResponseLossSimulationState;
 	traces: readonly InvocationTrace[];
 	verifiedOrder: CheckoutOrderProof | null;
-	onArmFault(): void;
 	onApproval(confirmed: boolean): void;
+	onToggleSimulation(): void;
 	onViewOrder(): void;
 };
 
@@ -147,17 +148,116 @@ function ActivityState({
 	);
 }
 
+const SIMULATION_STEPS: ReadonlyArray<{
+	state: ResponseLossSimulationState;
+	label: string;
+	detail: string;
+}> = [
+	{ state: "ready", label: "Ready", detail: "Normal checkout" },
+	{ state: "armed", label: "Armed", detail: "Next order" },
+	{ state: "triggered", label: "Triggered", detail: "Reply dropped" },
+	{ state: "recovered", label: "Recovered", detail: "Order verified" },
+];
+
+function ResponseLossSimulation({
+	simulationState,
+	onToggleSimulation,
+}: Pick<SignetDemoPanelProps, "simulationState" | "onToggleSimulation">) {
+	const activeIndex = SIMULATION_STEPS.findIndex(({ state }) => state === simulationState);
+	const control = (() => {
+		switch (simulationState) {
+			case "armed":
+				return { label: "Simulation armed", action: "Cancel", disabled: false };
+			case "triggered":
+				return { label: "Recovering the committed order", action: "Working", disabled: true };
+			case "recovered":
+				return { label: "Response loss recovered", action: "Run again", disabled: false };
+			default:
+				return { label: "Simulate checkout response loss", action: "Arm", disabled: false };
+		}
+	})();
+
+	return (
+		<section className="space-y-3 border-b border-border pb-5" aria-labelledby="response-loss-title">
+			<div>
+				<h3 id="response-loss-title" className="text-xs font-medium text-foreground">
+					Post-commit recovery simulation
+				</h3>
+				<p className="mt-1 text-[11px] leading-4 text-muted-foreground">
+					The next successful order is saved in Saleor, but its browser response is intentionally dropped.
+				</p>
+			</div>
+
+			<ol className="grid grid-cols-4 border-y border-border py-3" aria-label="Simulation progress">
+				{SIMULATION_STEPS.map((step, index) => {
+					const complete = index < activeIndex || simulationState === "recovered";
+					const active = index === activeIndex;
+					return (
+						<li
+							className="min-w-0 px-1 text-center"
+							key={step.state}
+							aria-current={active ? "step" : undefined}
+						>
+							<span
+								className={cn(
+									"mx-auto grid size-5 place-items-center rounded-full border font-mono text-[9px]",
+									complete && "border-success bg-success text-primary-foreground",
+									active && !complete && "border-signal text-signal",
+									!active && !complete && "border-border text-muted-foreground",
+								)}
+							>
+								{complete ? <Check className="size-3" aria-hidden /> : index + 1}
+							</span>
+							<p
+								className={cn(
+									"mt-1.5 truncate text-[10px] font-medium",
+									active ? "text-foreground" : "text-muted-foreground",
+								)}
+							>
+								{step.label}
+							</p>
+							<p className="mt-0.5 truncate text-[9px] text-muted-foreground">{step.detail}</p>
+						</li>
+					);
+				})}
+			</ol>
+
+			<button
+				className={cn(
+					"flex min-h-11 w-full items-center justify-between rounded-button border px-3.5 py-3 text-left text-sm transition-colors duration-fast focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-wait",
+					simulationState === "armed" || simulationState === "triggered" || simulationState === "recovered"
+						? "border-signal text-signal"
+						: "border-border bg-background text-foreground hover:border-foreground",
+				)}
+				disabled={control.disabled}
+				onClick={onToggleSimulation}
+				type="button"
+			>
+				<span className="flex items-center gap-2">
+					{simulationState === "triggered" ? (
+						<LoaderCircle className="size-4 animate-spin" aria-hidden />
+					) : (
+						<Zap className="size-4" aria-hidden />
+					)}
+					{control.label}
+				</span>
+				<span className="text-xs text-muted-foreground">{control.action}</span>
+			</button>
+		</section>
+	);
+}
+
 export function SignetDemoPanel({
 	approval,
 	activity,
 	events,
-	faultArmed,
 	proof,
 	registeredCount,
+	simulationState,
 	traces,
 	verifiedOrder,
-	onArmFault,
 	onApproval,
+	onToggleSimulation,
 	onViewOrder,
 }: SignetDemoPanelProps) {
 	const [view, setView] = useState<"demo" | "telemetry" | "developer">("demo");
@@ -262,22 +362,10 @@ export function SignetDemoPanel({
 								<p className="text-xs leading-5 text-muted-foreground">{AGENT_PROMPT}</p>
 							</div>
 
-							<button
-								className={cn(
-									"flex w-full items-center justify-between rounded-button border px-3.5 py-3 text-left text-sm transition-colors duration-fast",
-									faultArmed
-										? "border-signal text-signal"
-										: "border-border bg-background text-foreground hover:border-foreground",
-								)}
-								onClick={onArmFault}
-								type="button"
-							>
-								<span className="flex items-center gap-2">
-									<Zap className="size-4" aria-hidden />
-									{faultArmed ? "Lost response armed" : "Arm lost-response proof"}
-								</span>
-								<span className="text-xs text-muted-foreground">one shot</span>
-							</button>
+							<ResponseLossSimulation
+								simulationState={simulationState}
+								onToggleSimulation={onToggleSimulation}
+							/>
 
 							{proof.recovered || proof.replayed ? (
 								<div className="space-y-2 border-l-2 border-success py-1 pl-3 text-xs">

@@ -4,6 +4,20 @@ import { getCheckoutPayAmount, getCheckoutPayCurrency } from "@/checkout/lib/pay
 
 export const LOST_RESPONSE_FAULT = "saleor-signett:fault:lost-response";
 
+export type ResponseLossSimulationState = "ready" | "armed" | "triggered" | "recovered";
+
+export class ResponseLossSimulation {
+	#state: ResponseLossSimulationState = "ready";
+
+	read(): ResponseLossSimulationState {
+		return this.#state;
+	}
+
+	update(state: ResponseLossSimulationState): void {
+		this.#state = state;
+	}
+}
+
 export type CheckoutContext = {
 	checkoutId: string | null;
 	channel: string | null;
