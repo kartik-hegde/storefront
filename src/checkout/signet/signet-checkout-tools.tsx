@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { createSignett, type GuardEvent, WebStorageOperationJournal } from "signett";
+import { TraceAssembler, type InvocationTrace } from "signett/opentelemetry";
 import { useSignettActivity, useSignettTool } from "signett/react";
 import { IndexedDbIdempotencyStore } from "signett/stores";
 
@@ -26,6 +27,8 @@ export function SignetCheckoutTools() {
 	const [approval, setApproval] = useState<ApprovalRequest | null>(null);
 	const [faultArmed, setFaultArmed] = useState(false);
 	const [verifiedOrder, setVerifiedOrder] = useState<CheckoutOrderProof | null>(null);
+	const [traces, setTraces] = useState<readonly InvocationTrace[]>([]);
+	const traceAssembler = useMemo(() => new TraceAssembler({ maxInvocations: 12 }), []);
 
 	const idempotencyStore = useMemo(() => new IndexedDbIdempotencyStore(), []);
 	const operationJournal = useMemo(
@@ -41,15 +44,20 @@ export function SignetCheckoutTools() {
 		[],
 	);
 	const readContext = useCallback(() => checkoutContext(checkoutState.read()), [checkoutState]);
-	const observe = useCallback((event: GuardEvent) => {
-		setEvents((current) => [event, ...current].slice(0, 12));
-		if (event.stage === "recovered") {
-			setProof((current) => ({ ...current, recovered: true }));
-		}
-		if (event.stage === "replayed") {
-			setProof((current) => ({ ...current, replayed: true }));
-		}
-	}, []);
+	const observe = useCallback(
+		(event: GuardEvent) => {
+			const completed = traceAssembler.observe(event);
+			if (completed) setTraces(traceAssembler.snapshot());
+			setEvents((current) => [event, ...current].slice(0, 12));
+			if (event.stage === "recovered") {
+				setProof((current) => ({ ...current, recovered: true }));
+			}
+			if (event.stage === "replayed") {
+				setProof((current) => ({ ...current, replayed: true }));
+			}
+		},
+		[traceAssembler],
+	);
 
 	const signett = useMemo(
 		() =>
@@ -127,6 +135,7 @@ export function SignetCheckoutTools() {
 			faultArmed={faultArmed}
 			proof={proof}
 			registeredCount={registrations.filter(({ status }) => status === "registered").length}
+			traces={traces}
 			verifiedOrder={verifiedOrder}
 			onArmFault={armFault}
 			onApproval={decideApproval}

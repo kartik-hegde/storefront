@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import type { GuardEvent, SignettActivity } from "signett";
+import type { InvocationTrace } from "signett/opentelemetry";
 import {
 	Activity,
 	Bot,
@@ -23,6 +24,7 @@ import {
 import { cn } from "@/lib/utils";
 
 import type { CheckoutOrderProof } from "./checkout-operations";
+import { SignettTelemetryView } from "./signet-telemetry-view";
 
 export type ApprovalRequest = {
 	title: string;
@@ -37,6 +39,7 @@ type SignetDemoPanelProps = {
 	faultArmed: boolean;
 	proof: { recovered: boolean; replayed: boolean };
 	registeredCount: number;
+	traces: readonly InvocationTrace[];
 	verifiedOrder: CheckoutOrderProof | null;
 	onArmFault(): void;
 	onApproval(confirmed: boolean): void;
@@ -156,12 +159,13 @@ export function SignetDemoPanel({
 	faultArmed,
 	proof,
 	registeredCount,
+	traces,
 	verifiedOrder,
 	onArmFault,
 	onApproval,
 	onViewOrder,
 }: SignetDemoPanelProps) {
-	const [view, setView] = useState<"demo" | "developer">("demo");
+	const [view, setView] = useState<"demo" | "telemetry" | "developer">("demo");
 	const [copied, setCopied] = useState(false);
 
 	const copyPrompt = () => {
@@ -193,13 +197,23 @@ export function SignetDemoPanel({
 						</span>
 					</div>
 
-					<div className="mt-3 grid grid-cols-2 rounded-button bg-background/10 p-1 text-xs">
+					<div className="mt-3 grid grid-cols-3 rounded-button bg-background/10 p-1 text-xs">
 						<button
 							className={cn("rounded-button px-3 py-1.5", view === "demo" && "bg-background text-foreground")}
 							onClick={() => setView("demo")}
 							type="button"
 						>
 							Live demo
+						</button>
+						<button
+							className={cn(
+								"rounded-button px-3 py-1.5",
+								view === "telemetry" && "bg-background text-foreground",
+							)}
+							onClick={() => setView("telemetry")}
+							type="button"
+						>
+							Telemetry
 						</button>
 						<button
 							className={cn(
@@ -276,6 +290,8 @@ export function SignetDemoPanel({
 								</div>
 							) : null}
 						</>
+					) : view === "telemetry" ? (
+						<SignettTelemetryView traces={traces} />
 					) : (
 						<>
 							<div className="rounded-card border border-border bg-background p-3.5">

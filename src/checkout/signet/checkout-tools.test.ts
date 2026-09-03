@@ -1,4 +1,5 @@
 import { assertToolReady, createSignett, OutcomeUnknownError, VerificationError } from "signett";
+import { TraceAssembler, toOtlpJson } from "signett/opentelemetry";
 import { createWebMcpTestHarness, MemoryIdempotencyStore, MemoryOperationJournal } from "signett/testing";
 import { describe, expect, it, vi } from "vitest";
 
@@ -184,6 +185,47 @@ describe("Saleor Signett checkout tools", () => {
 		expect(payment).toHaveBeenCalledOnce();
 		expect(confirm).toHaveBeenCalledOnce();
 		expect(onVerifiedOrder).toHaveBeenCalledTimes(2);
+	});
+
+	it("emits privacy-safe OTEL evidence for execution and replay", async () => {
+		const { payment, tools } = setup();
+		const harness = createWebMcpTestHarness();
+		const traces = new TraceAssembler();
+		const signett = createSignett({
+			modelContext: harness.modelContext,
+			context: () => ({
+				checkoutId: "checkout-1",
+				channel: "default-channel",
+				email: "ada@example.com",
+				lineCount: 1,
+				totalAmount: 20,
+				currency: "USD",
+			}),
+			observe: (event) => {
+				traces.observe(event);
+			},
+		});
+		await signett.expose(tools.placeOrder);
+
+		await harness.invoke("place_order", orderInput);
+		await harness.invoke("place_order", orderInput);
+
+		const snapshot = traces.snapshot();
+		expect(snapshot.map((trace) => trace.outcome)).toEqual(["replayed", "succeeded"]);
+		expect(snapshot[1]?.phases.map((phase) => phase.name)).toEqual(
+			expect.arrayContaining([
+				"signett.validate",
+				"signett.authorize",
+				"signett.confirm",
+				"signett.execute",
+				"signett.verify",
+			]),
+		);
+		expect(payment).toHaveBeenCalledOnce();
+
+		const payload = JSON.stringify(toOtlpJson(snapshot, { serviceName: "signett-saleor-demo" }));
+		expect(payload).not.toContain("ada@example.com");
+		expect(payload).not.toContain(orderInput.operationId);
 	});
 
 	it("does not publish completion when the authoritative Saleor proof fails", async () => {
