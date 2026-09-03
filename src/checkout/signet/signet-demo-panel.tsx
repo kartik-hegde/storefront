@@ -4,18 +4,13 @@ import { useState } from "react";
 import type { GuardEvent, SignettActivity } from "signett";
 import type { InvocationTrace } from "signett/opentelemetry";
 import {
-	Activity,
-	Bot,
 	Check,
 	CircleAlert,
 	CircleX,
 	Clock3,
-	Code2,
 	ExternalLink,
 	LoaderCircle,
 	ShieldAlert,
-	ShieldCheck,
-	Sparkles,
 	Terminal,
 	X,
 	Zap,
@@ -69,21 +64,21 @@ function ActivityState({
 					icon: <LoaderCircle className="size-4 animate-spin" aria-hidden />,
 					label: "Agent is working",
 					detail: "Signett is validating intent before the Saleor effect.",
-					tone: "border-border bg-muted/60 text-foreground",
+					tone: "border-call text-foreground",
 				};
 			case "awaiting_confirmation":
 				return {
 					icon: <Clock3 className="size-4" aria-hidden />,
 					label: "Waiting for your approval",
 					detail: "No payment runs until the visible confirmation is approved.",
-					tone: "border-warning/30 bg-warning/5 text-warning",
+					tone: "border-warning text-foreground",
 				};
 			case "verifying":
 				return {
 					icon: <LoaderCircle className="size-4 animate-spin" aria-hidden />,
 					label: "Verifying with Saleor",
 					detail: "The mutation returned; the UI is waiting for authoritative proof.",
-					tone: "border-border bg-muted/60 text-foreground",
+					tone: "border-call text-foreground",
 				};
 			case "succeeded":
 				return verified
@@ -91,57 +86,57 @@ function ActivityState({
 							icon: <Check className="size-4" aria-hidden />,
 							label: "Order verified in Saleor",
 							detail: `${activity.resolution ?? "executed"} · ${activity.durationMs} ms · paid order ${verifiedOrder?.number ?? "confirmed"}`,
-							tone: "border-success/30 bg-success/5 text-success",
+							tone: "border-success text-foreground",
 						}
 					: {
 							icon: <ShieldAlert className="size-4" aria-hidden />,
 							label: "Action finished without proof",
 							detail: "The storefront will not present this as a completed order.",
-							tone: "border-warning/30 bg-warning/5 text-warning",
+							tone: "border-warning text-foreground",
 						};
 			case "declined":
 				return {
 					icon: <CircleX className="size-4" aria-hidden />,
 					label: "Order declined",
 					detail: "Nothing was charged and the checkout remains editable.",
-					tone: "border-border bg-muted/60 text-muted-foreground",
+					tone: "border-border text-muted-foreground",
 				};
 			case "failed":
 				return {
 					icon: <CircleX className="size-4" aria-hidden />,
 					label: "Action failed safely",
 					detail: "The agent receives structured repair guidance for the next step.",
-					tone: "border-destructive/30 bg-destructive/5 text-destructive",
+					tone: "border-destructive text-foreground",
 				};
 			case "unknown":
 				return {
 					icon: <ShieldAlert className="size-4" aria-hidden />,
 					label: "Outcome unknown — do not retry blindly",
 					detail: "Reuse the same operationId so Signett can recover instead of duplicating the effect.",
-					tone: "border-warning/30 bg-warning/5 text-warning",
+					tone: "border-warning text-foreground",
 				};
 			default:
 				return {
-					icon: <Bot className="size-4" aria-hidden />,
+					icon: <span className="mt-1 block size-2 rounded-full bg-call" aria-hidden />,
 					label: "Ready for the Signett Chrome Agent",
 					detail: "Add an item, open checkout, then give the agent the prompt below.",
-					tone: "border-border bg-muted/60 text-foreground",
+					tone: "border-call text-foreground",
 				};
 		}
 	})();
 
 	return (
-		<div className={cn("rounded-card border p-3.5", status.tone)} aria-live="polite">
+		<div className={cn("border-l-2 py-1 pl-3", status.tone)} aria-live="polite">
 			<div className="flex items-start gap-2.5">
 				<span className="mt-0.5">{status.icon}</span>
 				<div className="min-w-0 flex-1">
-					<p className="text-sm font-semibold">{status.label}</p>
-					<p className="mt-1 text-xs leading-5 opacity-80">{status.detail}</p>
+					<p className="text-sm font-medium">{status.label}</p>
+					<p className="mt-1 text-xs leading-5 text-muted-foreground">{status.detail}</p>
 				</div>
 			</div>
 			{verified && verifiedOrder ? (
 				<button
-					className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-button bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground hover:opacity-90"
+					className="mt-3 inline-flex items-center gap-2 border-b border-foreground pb-0.5 text-xs font-medium text-foreground hover:text-signal"
 					onClick={onViewOrder}
 					type="button"
 				>
@@ -178,37 +173,39 @@ export function SignetDemoPanel({
 	return (
 		<>
 			<aside
-				className="fixed bottom-4 right-4 z-50 max-h-[calc(100vh-2rem)] w-[min(28rem,calc(100vw-2rem))] overflow-y-auto rounded-card border border-border bg-card shadow-overlay"
+				className="fixed bottom-4 right-4 z-50 max-h-[calc(100vh-2rem)] w-[min(28rem,calc(100vw-2rem))] overflow-y-auto rounded-lg border border-border bg-card shadow-elevated"
 				data-testid="signet-demo-panel"
 			>
-				<div className="sticky top-0 z-10 border-b border-border bg-foreground px-5 pb-3 pt-4 text-inverse">
+				<div className="sticky top-0 z-10 border-b border-border bg-card px-5 pt-4 text-foreground">
 					<div className="flex items-center justify-between gap-3">
-						<div className="flex items-center gap-3">
-							<span className="grid size-9 place-items-center rounded-full bg-background text-foreground">
-								<ShieldCheck className="size-5" aria-hidden />
-							</span>
-							<div>
-								<p className="text-eyebrow text-inverse-muted">Live Saleor checkout</p>
-								<h2 className="text-base font-semibold">Protected by Signett</h2>
-							</div>
+						<div>
+							<p className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+								<span className="size-2 bg-signal" aria-hidden /> Signett / Saleor
+							</p>
+							<h2 className="mt-1 text-sm font-semibold">Agent checkout proof</h2>
 						</div>
-						<span className="rounded-full border border-inverse px-2.5 py-1 text-xs text-inverse-subtle">
-							{registeredCount}/5 tools
+						<span className="font-mono text-[10px] text-muted-foreground">
+							{registeredCount}/5 tools live
 						</span>
 					</div>
 
-					<div className="mt-3 grid grid-cols-3 rounded-button bg-background/10 p-1 text-xs">
+					<nav className="mt-4 grid grid-cols-3 text-xs" aria-label="Demo views">
 						<button
-							className={cn("rounded-button px-3 py-1.5", view === "demo" && "bg-background text-foreground")}
+							aria-pressed={view === "demo"}
+							className={cn(
+								"border-b-2 border-transparent px-2 pb-2.5 text-muted-foreground",
+								view === "demo" && "border-signal text-foreground",
+							)}
 							onClick={() => setView("demo")}
 							type="button"
 						>
 							Live demo
 						</button>
 						<button
+							aria-pressed={view === "telemetry"}
 							className={cn(
-								"rounded-button px-3 py-1.5",
-								view === "telemetry" && "bg-background text-foreground",
+								"border-b-2 border-transparent px-2 pb-2.5 text-muted-foreground",
+								view === "telemetry" && "border-signal text-foreground",
 							)}
 							onClick={() => setView("telemetry")}
 							type="button"
@@ -216,42 +213,49 @@ export function SignetDemoPanel({
 							Telemetry
 						</button>
 						<button
+							aria-pressed={view === "developer"}
 							className={cn(
-								"rounded-button px-3 py-1.5",
-								view === "developer" && "bg-background text-foreground",
+								"border-b-2 border-transparent px-2 pb-2.5 text-muted-foreground",
+								view === "developer" && "border-signal text-foreground",
 							)}
 							onClick={() => setView("developer")}
 							type="button"
 						>
 							Developer proof
 						</button>
-					</div>
+					</nav>
 				</div>
 
-				<div className="space-y-4 p-5">
+				<div className="space-y-5 p-5">
 					<ActivityState activity={activity} verifiedOrder={verifiedOrder} onViewOrder={onViewOrder} />
 
 					{view === "demo" ? (
 						<>
-							<div className="grid grid-cols-3 gap-2 text-center text-xs">
+							<div className="grid grid-cols-3 divide-x divide-border border-y border-border text-xs">
 								{[
-									["Intent", "validated"],
-									["Effect", "idempotent"],
-									["Outcome", "verified"],
-								].map(([label, value]) => (
-									<div className="rounded-card bg-muted px-2 py-2.5" key={label}>
-										<p className="font-medium text-foreground">{value}</p>
-										<p className="mt-0.5 text-muted-foreground">{label}</p>
+									["01", "intent", "validated"],
+									["02", "effect", "idempotent"],
+									["03", "outcome", "verified"],
+								].map(([number, label, value]) => (
+									<div className="px-3 py-3" key={label}>
+										<p className="font-mono text-[9px] uppercase tracking-wider text-muted-foreground">
+											{number} {label}
+										</p>
+										<p className="mt-1 font-medium text-foreground">{value}</p>
 									</div>
 								))}
 							</div>
 
-							<div className="rounded-card border border-border bg-background p-3.5">
+							<div className="border-b border-border pb-5">
 								<div className="mb-2 flex items-center justify-between gap-3">
-									<p className="flex items-center gap-2 text-xs font-semibold text-foreground">
-										<Sparkles className="size-3.5" aria-hidden /> Chrome Agent prompt
+									<p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+										Chrome Agent prompt
 									</p>
-									<button className="text-xs font-medium text-primary" onClick={copyPrompt} type="button">
+									<button
+										className="text-xs font-medium text-foreground hover:text-signal"
+										onClick={copyPrompt}
+										type="button"
+									>
 										{copied ? "Copied" : "Copy"}
 									</button>
 								</div>
@@ -260,10 +264,10 @@ export function SignetDemoPanel({
 
 							<button
 								className={cn(
-									"flex w-full items-center justify-between rounded-button border px-3.5 py-2.5 text-left text-sm transition-colors duration-fast",
+									"flex w-full items-center justify-between rounded-button border px-3.5 py-3 text-left text-sm transition-colors duration-fast",
 									faultArmed
-										? "border-destructive bg-destructive/5 text-destructive"
-										: "border-border bg-background text-foreground hover:bg-muted",
+										? "border-signal text-signal"
+										: "border-border bg-background text-foreground hover:border-foreground",
 								)}
 								onClick={onArmFault}
 								type="button"
@@ -276,7 +280,7 @@ export function SignetDemoPanel({
 							</button>
 
 							{proof.recovered || proof.replayed ? (
-								<div className="space-y-2 rounded-card border border-success/30 bg-success/5 p-3 text-xs">
+								<div className="space-y-2 border-l-2 border-success py-1 pl-3 text-xs">
 									{proof.recovered ? (
 										<p className="flex items-center gap-2 font-medium text-success">
 											<Check className="size-3.5" aria-hidden /> Lost response recovered from Saleor
@@ -294,8 +298,8 @@ export function SignetDemoPanel({
 						<SignettTelemetryView traces={traces} />
 					) : (
 						<>
-							<div className="rounded-card border border-border bg-background p-3.5">
-								<p className="mb-2 flex items-center gap-2 text-xs font-semibold text-foreground">
+							<div className="border-b border-border pb-5">
+								<p className="mb-2 flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
 									<Terminal className="size-3.5" aria-hidden /> Reproduce from the terminal
 								</p>
 								<pre className="overflow-x-auto whitespace-pre-wrap text-[11px] leading-5 text-muted-foreground">
@@ -303,16 +307,14 @@ export function SignetDemoPanel({
 								</pre>
 							</div>
 
-							<div className="grid grid-cols-2 gap-2 text-xs">
-								<div className="rounded-card bg-muted p-3">
-									<Code2 className="mb-2 size-4 text-foreground" aria-hidden />
+							<div className="grid grid-cols-2 divide-x divide-border border-y border-border text-xs">
+								<div className="py-3 pr-3">
 									<p className="font-medium text-foreground">Same tool contract</p>
 									<p className="mt-1 leading-5 text-muted-foreground">
 										Browser, tests, and evals share schemas.
 									</p>
 								</div>
-								<div className="rounded-card bg-muted p-3">
-									<Activity className="mb-2 size-4 text-foreground" aria-hidden />
+								<div className="py-3 pl-3">
 									<p className="font-medium text-foreground">Metadata-only traces</p>
 									<p className="mt-1 leading-5 text-muted-foreground">No checkout inputs are logged here.</p>
 								</div>
@@ -320,12 +322,12 @@ export function SignetDemoPanel({
 
 							<div>
 								<div className="mb-2 flex items-center justify-between">
-									<p className="flex items-center gap-2 text-sm font-medium text-foreground">
-										<Bot className="size-4" aria-hidden /> Lifecycle trace
+									<p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+										Lifecycle trace
 									</p>
 									<span className="text-xs text-muted-foreground">latest first</span>
 								</div>
-								<div className="max-h-44 space-y-1.5 overflow-y-auto rounded-card border border-border bg-background p-2.5">
+								<div className="max-h-44 space-y-1.5 overflow-y-auto border-t border-border pt-2.5">
 									{events.length === 0 ? (
 										<p className="py-3 text-center text-xs text-muted-foreground">
 											Waiting for an agent tool call…
