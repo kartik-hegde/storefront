@@ -1,7 +1,5 @@
 /** @type {import('next').NextConfig} */
 import createNextIntlPlugin from "next-intl/plugin";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { paperCacheLifeProfiles } from "./src/lib/cache-life-profiles.data.mjs";
 import {
 	PUBLIC_ASSET_CACHE_CONTROL,
@@ -14,7 +12,6 @@ const allowedDevOrigins = process.env.ALLOWED_DEV_ORIGINS?.split(",")
 	.filter(Boolean);
 
 const isDevelopment = process.env.NODE_ENV === "development";
-const projectDirectory = path.dirname(fileURLToPath(import.meta.url));
 
 /** Host of the configured Saleor instance — self-hosted deploys serve media from it. */
 function saleorApiHostname() {
@@ -67,13 +64,6 @@ const config = {
 	// See: https://nextjs.org/docs/app/getting-started/cache-components
 	cacheComponents: true,
 
-	// The Signet demo consumes the locally built package from the adjacent repository.
-	// Turbopack otherwise treats the storefront directory as a hard filesystem boundary.
-	turbopack: {
-		root: path.resolve(projectDirectory, ".."),
-	},
-	transpilePackages: ["@signet/webmcp"],
-
 	// Next.js 16.3 — prefetch one reusable loading shell per route (not per link).
 	// See: https://nextjs.org/blog/next-16-3-instant-navigations
 	partialPrefetching: true,
@@ -123,6 +113,12 @@ const config = {
 	async headers() {
 		const isDev = isDevelopment;
 		return [
+			{
+				// Native WebMCP is available only to origin-keyed documents. Make the
+				// requirement explicit for local previews and hosted challenge builds.
+				source: "/:path*",
+				headers: [{ key: "Origin-Agent-Cluster", value: "?1" }],
+			},
 			// In development, prevent aggressive caching of dynamic chunks
 			...(isDev
 				? [

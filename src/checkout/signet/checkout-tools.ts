@@ -1,4 +1,4 @@
-import type { IdempotencyStore, OperationJournal, SignetTool } from "@signet/webmcp";
+import type { IdempotencyStore, OperationJournal, SignettTool } from "signett";
 
 import type { CheckoutGatewayMessagesHook } from "@/checkout/hooks/use-checkout-gateway-messages";
 import { getCheckoutPayAmount, getCheckoutPayCurrency } from "@/checkout/lib/payment/checkout-pay-amount";
@@ -31,18 +31,19 @@ export type CheckoutToolDependencies = {
 	operations: CheckoutOperations;
 	requestApproval(title: string, detail: string): Promise<boolean>;
 	consumeLostResponseFault(): boolean;
+	onVerifiedOrder?(proof: CheckoutOrderProof): void;
 };
 
 export type CheckoutToolSet = {
-	inspect: SignetTool<Record<string, never>, CheckoutContext, CheckoutContext>;
-	contact: SignetTool<ContactInput, CheckoutContext, CheckoutContext>;
-	deliveryOptions: SignetTool<
+	inspect: SignettTool<Record<string, never>, CheckoutContext, CheckoutContext>;
+	contact: SignettTool<ContactInput, CheckoutContext, CheckoutContext>;
+	deliveryOptions: SignettTool<
 		Record<string, never>,
 		{ deliveries: Array<Record<string, unknown>> },
 		CheckoutContext
 	>;
-	delivery: SignetTool<DeliveryInput, CheckoutContext, CheckoutContext>;
-	placeOrder: SignetTool<PlaceOrderInput, OrderResult, CheckoutContext>;
+	delivery: SignettTool<DeliveryInput, CheckoutContext, CheckoutContext>;
+	placeOrder: SignettTool<PlaceOrderInput, OrderResult, CheckoutContext>;
 };
 
 export function createCheckoutTools(dependencies: CheckoutToolDependencies): CheckoutToolSet {
@@ -52,6 +53,7 @@ export function createCheckoutTools(dependencies: CheckoutToolDependencies): Che
 		gatewayMessages,
 		idempotencyStore,
 		operationJournal,
+		onVerifiedOrder,
 		operations,
 		refreshCheckout,
 		requestApproval,
@@ -345,13 +347,14 @@ export function createCheckoutTools(dependencies: CheckoutToolDependencies): Che
 		},
 		verify: async ({ input, output, context }) => {
 			const proof = await operations.getOrderProof(output.orderId);
-			return (
+			const verified =
 				proof?.isPaid === true &&
 				proof.email === context.email &&
 				proof.lineCount === context.lineCount &&
 				proof.currency === input.expectedCurrency &&
-				nearlyEqual(proof.totalAmount, input.expectedTotalAmount)
-			);
+				nearlyEqual(proof.totalAmount, input.expectedTotalAmount);
+			if (verified && proof) onVerifiedOrder?.(proof);
+			return verified;
 		},
 		outputBudgetBytes: 2048,
 	};

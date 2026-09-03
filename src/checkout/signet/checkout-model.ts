@@ -2,7 +2,7 @@ import type { AddressInput, CountryCode } from "@/checkout/graphql/generated/ope
 import type { ServerCheckout } from "@/checkout/lib/checkout-types";
 import { getCheckoutPayAmount, getCheckoutPayCurrency } from "@/checkout/lib/payment/checkout-pay-amount";
 
-export const LOST_RESPONSE_FAULT = "saleor-signet:fault:lost-response";
+export const LOST_RESPONSE_FAULT = "saleor-signett:fault:lost-response";
 
 export type CheckoutContext = {
 	checkoutId: string | null;

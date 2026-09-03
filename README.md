@@ -1,3 +1,31 @@
+# Signett × Saleor: reliable agent checkout
+
+This branch is the live WebMCP challenge demo for [Signett](https://github.com/signettai/signett). It adds five native WebMCP tools to Saleor's production-grade Paper storefront and makes the application UI follow the verified tool lifecycle.
+
+The demo proves a narrow, falsifiable claim: a Chrome agent can complete one Saleor test checkout, with explicit approval, and an exact retry cannot create a second order for the same operation. Saleor's dummy gateway is used; no real money moves.
+
+## What to try
+
+1. Add a product and open checkout.
+2. In the Signett Chrome Agent, run: _“Complete this Saleor checkout using the cheapest eligible delivery. Use one stable operationId for place_order and finish the test order exactly once.”_
+3. Approve the visible order confirmation.
+4. Watch the storefront remain in **verifying** until an authoritative Saleor order read proves the order is paid and matches the approved email, lines, total, and currency.
+5. For the failure drill, arm **Lost response**, repeat the task with the same operation ID, and see the order recovered instead of recreated.
+
+The **Developer proof** tab exposes privacy-safe lifecycle traces and the exact terminal commands for the same native-browser smoke test and Saleor oracle.
+
+## Run locally
+
+```sh
+cp .env.signett.example .env.local
+pnpm install
+pnpm dev
+```
+
+The example environment targets Saleor's public showcase and enables its test-only dummy payment path. Use your own Saleor instance for durable testing.
+
+---
+
 [![Deploy with Vercel](https://vercel.com/button)](<https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fsaleor%2Fstorefront&env=NEXT_PUBLIC_SALEOR_API_URL%2CNEXT_PUBLIC_DEFAULT_CHANNEL%2CNEXT_PUBLIC_DEFAULT_LOCALE%2CNEXT_PUBLIC_STOREFRONT_LOCALES&envDescription=Your%20Saleor%20API%20URL%20is%20the%20GraphQL%20endpoint%20of%20your%20instance%20(e.g.%20https%3A%2F%2Fyour-instance.saleor.cloud%2Fgraphql%2F).%20The%20channel%20slug%20can%20be%20found%20in%20Saleor%20Dashboard%20under%20Configuration%20%3E%20Channels%20(e.g.%20default-channel).%20For%20multi-channel%2C%20set%20STOREFRONT_CHANNELS%20(e.g.%20us%2Cuk)%20and%20optionally%20SALEOR_APP_TOKEN%20for%20the%20footer%20selector.%20For%20locales%2C%20set%20NEXT_PUBLIC_DEFAULT_LOCALE%20(e.g.%20en)%20and%20NEXT_PUBLIC_STOREFRONT_LOCALES%20(e.g.%20en%2Cpl%2Cde%2Cfr%2Cfi%2Cnb).&envLink=https%3A%2F%2Fgithub.com%2Fsaleor%2Fstorefront%23environment-variables&project-name=my-saleor-storefront&repository-name=my-saleor-storefront&demo-title=Saleor%20Next.js%20Storefront&demo-description=Starter%20pack%20for%20building%20performant%20e-commerce%20experiences%20with%20Saleor.&demo-url=https%3A%2F%2Fstorefront.saleor.io%2F&demo-image=https%3A%2F%2Fstorefront-d5h86wzey-saleorcommerce.vercel.app%2Fopengraph-image.png%3F4db0ee8cf66e90af>)
 
 <img width="1920" height="1080" alt="saleor-storefront-paper-fin" src="https://github.com/user-attachments/assets/a8e37c20-35c8-42e0-a9c5-5c0b6097b921" />

@@ -1,9 +1,5 @@
-import { assertToolReady, createSignet, OutcomeUnknownError } from "@signet/webmcp";
-import {
-	createWebMcpTestHarness,
-	MemoryIdempotencyStore,
-	MemoryOperationJournal,
-} from "@signet/webmcp/testing";
+import { assertToolReady, createSignett, OutcomeUnknownError, VerificationError } from "signett";
+import { createWebMcpTestHarness, MemoryIdempotencyStore, MemoryOperationJournal } from "signett/testing";
 import { describe, expect, it, vi } from "vitest";
 
 import type { CheckoutGatewayMessagesHook } from "@/checkout/hooks/use-checkout-gateway-messages";
@@ -86,6 +82,7 @@ function setup(
 	} as unknown as CheckoutOperations;
 	const idempotencyStore = options.idempotencyStore ?? new MemoryIdempotencyStore();
 	const journal = options.journal ?? new MemoryOperationJournal();
+	const onVerifiedOrder = vi.fn();
 	let lostResponse = options.lostResponse ?? false;
 	const confirm = vi.fn(async () => true);
 	const tools = createCheckoutTools({
@@ -98,18 +95,19 @@ function setup(
 		gatewayMessages: {} as CheckoutGatewayMessagesHook,
 		idempotencyStore,
 		operationJournal: journal,
+		onVerifiedOrder,
 		operations,
 		refreshCheckout: vi.fn(async () => options.liveCheckout ?? initial),
 		requestApproval: confirm,
 		setCheckout: (value) => checkoutState.update(value),
 	});
 
-	return { confirm, getOrderProof, idempotencyStore, journal, payment, tools };
+	return { confirm, getOrderProof, idempotencyStore, journal, onVerifiedOrder, payment, tools };
 }
 
 async function harnessFor(placeOrder: ReturnType<typeof setup>["tools"]["placeOrder"]) {
 	const harness = createWebMcpTestHarness();
-	const signet = createSignet({
+	const signett = createSignett({
 		modelContext: harness.modelContext,
 		context: () => ({
 			checkoutId: "checkout-1",
@@ -120,13 +118,13 @@ async function harnessFor(placeOrder: ReturnType<typeof setup>["tools"]["placeOr
 			currency: "USD",
 		}),
 	});
-	await signet.expose(placeOrder);
+	await signett.expose(placeOrder);
 	return harness;
 }
 
 async function harnessForContact(contact: ReturnType<typeof setup>["tools"]["contact"]) {
 	const harness = createWebMcpTestHarness();
-	const signet = createSignet({
+	const signett = createSignett({
 		modelContext: harness.modelContext,
 		context: () => ({
 			checkoutId: "checkout-1",
@@ -137,11 +135,11 @@ async function harnessForContact(contact: ReturnType<typeof setup>["tools"]["con
 			currency: "USD",
 		}),
 	});
-	await signet.expose(contact);
+	await signett.expose(contact);
 	return harness;
 }
 
-describe("Saleor Signet checkout tools", () => {
+describe("Saleor Signett checkout tools", () => {
 	it("keeps all five production tools agent-ready", () => {
 		const { tools } = setup();
 
@@ -176,7 +174,7 @@ describe("Saleor Signet checkout tools", () => {
 	});
 
 	it("places one order and replays the result for the same intent", async () => {
-		const { confirm, payment, tools } = setup();
+		const { confirm, onVerifiedOrder, payment, tools } = setup();
 		const harness = await harnessFor(tools.placeOrder);
 
 		const first = await harness.invoke("place_order", orderInput);
@@ -185,6 +183,24 @@ describe("Saleor Signet checkout tools", () => {
 		expect(replay).toEqual(first);
 		expect(payment).toHaveBeenCalledOnce();
 		expect(confirm).toHaveBeenCalledOnce();
+		expect(onVerifiedOrder).toHaveBeenCalledTimes(2);
+	});
+
+	it("does not publish completion when the authoritative Saleor proof fails", async () => {
+		const getOrderProof = vi.fn(async () => ({
+			orderId: "order-1",
+			number: "1001",
+			email: "ada@example.com",
+			isPaid: false,
+			lineCount: 1,
+			totalAmount: 20,
+			currency: "USD",
+		}));
+		const { onVerifiedOrder, tools } = setup({ getOrderProof });
+		const harness = await harnessFor(tools.placeOrder);
+
+		await expect(harness.invoke("place_order", orderInput)).rejects.toBeInstanceOf(VerificationError);
+		expect(onVerifiedOrder).not.toHaveBeenCalled();
 	});
 
 	it("coalesces concurrent calls with the same operation ID", async () => {

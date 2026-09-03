@@ -32,9 +32,6 @@ importers:
       '@saleor/auth-sdk':
         specifier: 1.0.3
         version: 1.0.3(next@16.3.3(@babel/core@7.28.6)(@playwright/test@1.55.0)(@types/node@24.12.4)(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(urql@4.0.6(graphql@16.8.1)(react@19.2.7))
-      '@signet/webmcp':
-        specifier: link:../signet
-        version: link:../signet
       '@stripe/react-stripe-js':
         specifier: 6.6.0
         version: 6.6.0(@stripe/stripe-js@9.8.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
@@ -98,6 +95,9 @@ importers:
       sharp:
         specifier: 0.35.2
         version: 0.35.2
+      signett:
+        specifier: 0.1.1
+        version: 0.1.1(react@19.2.7)
       tailwind-merge:
         specifier: 3.6.0
         version: 3.6.0
@@ -498,6 +498,9 @@ packages:
   '@babel/types@7.28.6':
     resolution: {integrity: sha512-0ZrskXVEHSWIqZM/sQZ4EV3jZJXRkio/WCxaqKZP1g//CEWEPSfeZFcms4XeKBCHU0ZKnIkdJeU/kF+eRp5lBg==}
     engines: {node: '>=6.9.0'}
+
+  '@cfworker/json-schema@4.1.1':
+    resolution: {integrity: sha512-gAmrUZSGtKc3AiBL71iNWxDsyUC5uMaKKGdvzYsBoTW/xi42JQHl7eKV2OYzCUqvc+D2RCcf7EXY2iCyFIk6og==}
 
   '@emnapi/core@1.8.1':
     resolution: {integrity: sha512-AvT9QFpxK0Zd8J0jopedNm+w/2fIzvtPKPjqyw9jwvBaReTTqPBk9Hixaz7KbjimP+QNz605/XnjFcDAL2pqBg==}
@@ -4976,6 +4979,18 @@ packages:
   signedsource@1.0.0:
     resolution: {integrity: sha512-6+eerH9fEnNmi/hyM1DXcRK3pWdoMQtlkQ+ns0ntzunjKqp5i3sKCc80ym8Fib3iaYhdJUOPdhlJWj1tvge2Ww==}
 
+  signett@0.1.1:
+    resolution: {integrity: sha512-E/h6WW7Uhtp+p44VObt/FID5DAsgTvhpXYGZPNJ2h5x/zoag62OsFp28E9f7Mw4iIAIPKliNR4SumsLZia5l3A==}
+    engines: {node: '>=20'}
+    peerDependencies:
+      '@opentelemetry/api': '>=1.9.0 <2'
+      react: '>=18 <20'
+    peerDependenciesMeta:
+      '@opentelemetry/api':
+        optional: true
+      react:
+        optional: true
+
   slash@3.0.0:
     resolution: {integrity: sha512-g9Q1haeby36OSStwb4ntCGGGaKsaVSjQ68fBxoQcutl5fS1vuY18H3wSt3jFyFtrkx+Kz0V1G85A4MyAdDMi2Q==}
     engines: {node: '>=8'}
@@ -5917,6 +5932,8 @@ snapshots:
     dependencies:
       '@babel/helper-string-parser': 7.27.1
       '@babel/helper-validator-identifier': 7.28.5
+
+  '@cfworker/json-schema@4.1.1': {}
 
   '@emnapi/core@1.8.1':
     dependencies:
@@ -10514,6 +10531,12 @@ snapshots:
   signal-exit@4.1.0: {}
 
   signedsource@1.0.0: {}
+
+  signett@0.1.1(react@19.2.7):
+    dependencies:
+      '@cfworker/json-schema': 4.1.1
+    optionalDependencies:
+      react: 19.2.7
 
   slash@3.0.0: {}
 
