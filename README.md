@@ -1,16 +1,16 @@
-# Signett × Saleor: reliable agent checkout
+# Signett × Saleor: reliable agent purchase requests
 
 This branch is the live WebMCP challenge demo for [Signett](https://github.com/signettai/signett). It adds four catalog tools and five guarded checkout tools to Saleor's production-grade Paper storefront, then makes the application UI follow the verified tool lifecycle.
 
-The demo proves a narrow, falsifiable claim: a Chrome agent can complete one Saleor test checkout, with explicit approval, and an exact retry cannot create a second order for the same operation. Saleor's dummy gateway is used; no real money moves.
+The demo proves a narrow, falsifiable claim: a Chrome agent can prepare a real Saleor checkout and submit it as a merchant-review purchase request, with explicit approval, while an exact retry cannot duplicate the request. The durable effect is persisted on the live Saleor checkout; no payment or order is simulated.
 
 ## Three-act judge flow
 
 1. **Agent workflow:** on the homepage, ask the Signett Chrome Agent: _“Find one inexpensive in-stock product, add exactly one to my cart, and begin checkout.”_ The agent composes `search_products`, `inspect_cart`, `add_to_cart`, and `begin_checkout` against live Saleor data.
-2. **Guarded effect:** in checkout, ask: _“Complete this Saleor test checkout using the cheapest eligible delivery. Use one stable operationId for place_order and finish it exactly once.”_ The agent composes the five checkout tools, and the app requests visible confirmation before the order effect.
-3. **Failure and evidence:** arm **Simulate checkout response loss** before `place_order`. The visible `Ready → Armed → Triggered → Recovered` progression shows Signett journal the committed effect and recover the authoritative Saleor result; an exact retry replays it instead of creating another order. Open **Telemetry** for the actual Signett-generated OTEL waterfall and copyable OTLP JSON; open **Developer proof** for the equivalent terminal test and Saleor oracle.
+2. **Guarded effect:** in checkout, ask: _“Submit this checkout as a purchase request using the cheapest delivery option.”_ The agent composes the five checkout tools, generates its own stable operation ID, and the app requests visible confirmation before `submit_purchase_request` persists anything.
+3. **Failure and evidence:** arm **Simulate lost request response** before submission. The visible `Ready → Armed → Triggered → Recovered` progression shows Signett journal the committed effect and recover the authoritative Saleor state; an exact retry replays it instead of duplicating the request. Open **Telemetry** for the actual Signett-generated OTEL waterfall and copyable OTLP JSON; open **Developer proof** for the equivalent terminal test.
 
-The claim is deliberately stronger than “the agent found some WebMCP tools”: every effect is schema-validated, authorized, confirmed, idempotently claimed, recoverable after an ambiguous failure, and independently verified before the UI reports success. Telemetry is metadata-only; customer inputs and payment data are not exported.
+The claim is deliberately stronger than “the agent found some WebMCP tools”: every effect is schema-validated, authorized, confirmed, idempotently claimed, recoverable after an ambiguous failure, and independently verified before the UI reports success. Telemetry is metadata-only; customer inputs are not exported.
 
 ## Run locally
 

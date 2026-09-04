@@ -8,7 +8,6 @@ import {
 	CircleAlert,
 	CircleX,
 	Clock3,
-	ExternalLink,
 	LoaderCircle,
 	ShieldAlert,
 	Terminal,
@@ -19,7 +18,7 @@ import {
 import { cn } from "@/lib/utils";
 
 import type { ResponseLossSimulationState } from "./checkout-model";
-import type { CheckoutOrderProof } from "./checkout-operations";
+import type { CheckoutRequestProof } from "./checkout-operations";
 import { SignettTelemetryView } from "./signet-telemetry-view";
 
 export type ApprovalRequest = {
@@ -36,14 +35,12 @@ type SignetDemoPanelProps = {
 	registeredCount: number;
 	simulationState: ResponseLossSimulationState;
 	traces: readonly InvocationTrace[];
-	verifiedOrder: CheckoutOrderProof | null;
+	verifiedRequest: CheckoutRequestProof | null;
 	onApproval(confirmed: boolean): void;
 	onToggleSimulation(): void;
-	onViewOrder(): void;
 };
 
-const AGENT_PROMPT =
-	"Complete this Saleor checkout using the cheapest eligible delivery. Use one stable operationId for place_order and finish the test order exactly once.";
+const AGENT_PROMPT = "Submit this checkout as a purchase request using the cheapest delivery option.";
 
 function eventTone(stage: GuardEvent["stage"]): string {
 	if (stage === "failed") return "text-destructive";
@@ -54,9 +51,8 @@ function eventTone(stage: GuardEvent["stage"]): string {
 
 function ActivityState({
 	activity,
-	verifiedOrder,
-	onViewOrder,
-}: Pick<SignetDemoPanelProps, "activity" | "verifiedOrder" | "onViewOrder">) {
+	verifiedRequest,
+}: Pick<SignetDemoPanelProps, "activity" | "verifiedRequest">) {
 	const verified = activity?.phase === "succeeded" && activity.verified;
 	const status = (() => {
 		switch (activity?.phase) {
@@ -71,7 +67,7 @@ function ActivityState({
 				return {
 					icon: <Clock3 className="size-4" aria-hidden />,
 					label: "Waiting for your approval",
-					detail: "No payment runs until the visible confirmation is approved.",
+					detail: "No request is submitted until the visible confirmation is approved.",
 					tone: "border-warning text-foreground",
 				};
 			case "verifying":
@@ -85,21 +81,21 @@ function ActivityState({
 				return verified
 					? {
 							icon: <Check className="size-4" aria-hidden />,
-							label: "Order verified in Saleor",
-							detail: `${activity.resolution ?? "executed"} · ${activity.durationMs} ms · paid order ${verifiedOrder?.number ?? "confirmed"}`,
+							label: "Purchase request verified in Saleor",
+							detail: `${activity.resolution ?? "executed"} · ${activity.durationMs} ms · request ${verifiedRequest?.requestId ?? "confirmed"}`,
 							tone: "border-success text-foreground",
 						}
 					: {
 							icon: <ShieldAlert className="size-4" aria-hidden />,
 							label: "Action finished without proof",
-							detail: "The storefront will not present this as a completed order.",
+							detail: "The storefront will not present this as a submitted request.",
 							tone: "border-warning text-foreground",
 						};
 			case "declined":
 				return {
 					icon: <CircleX className="size-4" aria-hidden />,
-					label: "Order declined",
-					detail: "Nothing was charged and the checkout remains editable.",
+					label: "Request declined",
+					detail: "Nothing was submitted and the checkout remains editable.",
 					tone: "border-border text-muted-foreground",
 				};
 			case "failed":
@@ -113,7 +109,8 @@ function ActivityState({
 				return {
 					icon: <ShieldAlert className="size-4" aria-hidden />,
 					label: "Outcome unknown — do not retry blindly",
-					detail: "Reuse the same operationId so Signett can recover instead of duplicating the effect.",
+					detail:
+						"Signett retains the internal operation ID so it can recover without duplicating the effect.",
 					tone: "border-warning text-foreground",
 				};
 			default:
@@ -135,15 +132,6 @@ function ActivityState({
 					<p className="mt-1 text-xs leading-5 text-muted-foreground">{status.detail}</p>
 				</div>
 			</div>
-			{verified && verifiedOrder ? (
-				<button
-					className="mt-3 inline-flex items-center gap-2 border-b border-foreground pb-0.5 text-xs font-medium text-foreground hover:text-signal"
-					onClick={onViewOrder}
-					type="button"
-				>
-					View verified order <ExternalLink className="size-3.5" aria-hidden />
-				</button>
-			) : null}
 		</div>
 	);
 }
@@ -153,10 +141,10 @@ const SIMULATION_STEPS: ReadonlyArray<{
 	label: string;
 	detail: string;
 }> = [
-	{ state: "ready", label: "Ready", detail: "Normal checkout" },
-	{ state: "armed", label: "Armed", detail: "Next order" },
+	{ state: "ready", label: "Ready", detail: "Normal request" },
+	{ state: "armed", label: "Armed", detail: "Next request" },
 	{ state: "triggered", label: "Triggered", detail: "Reply dropped" },
-	{ state: "recovered", label: "Recovered", detail: "Order verified" },
+	{ state: "recovered", label: "Recovered", detail: "Request verified" },
 ];
 
 function ResponseLossSimulation({
@@ -169,11 +157,11 @@ function ResponseLossSimulation({
 			case "armed":
 				return { label: "Simulation armed", action: "Cancel", disabled: false };
 			case "triggered":
-				return { label: "Recovering the committed order", action: "Working", disabled: true };
+				return { label: "Recovering the committed request", action: "Working", disabled: true };
 			case "recovered":
 				return { label: "Response loss recovered", action: "Run again", disabled: false };
 			default:
-				return { label: "Simulate checkout response loss", action: "Arm", disabled: false };
+				return { label: "Simulate lost request response", action: "Arm", disabled: false };
 		}
 	})();
 
@@ -184,7 +172,7 @@ function ResponseLossSimulation({
 					Post-commit recovery simulation
 				</h3>
 				<p className="mt-1 text-[11px] leading-4 text-muted-foreground">
-					The next successful order is saved in Saleor, but its browser response is intentionally dropped.
+					The next purchase request is saved in Saleor, but its browser response is intentionally dropped.
 				</p>
 			</div>
 
@@ -255,10 +243,9 @@ export function SignetDemoPanel({
 	registeredCount,
 	simulationState,
 	traces,
-	verifiedOrder,
+	verifiedRequest,
 	onApproval,
 	onToggleSimulation,
-	onViewOrder,
 }: SignetDemoPanelProps) {
 	const [view, setView] = useState<"demo" | "telemetry" | "developer">("demo");
 	const [copied, setCopied] = useState(false);
@@ -327,7 +314,7 @@ export function SignetDemoPanel({
 				</div>
 
 				<div className="space-y-5 p-5">
-					<ActivityState activity={activity} verifiedOrder={verifiedOrder} onViewOrder={onViewOrder} />
+					<ActivityState activity={activity} verifiedRequest={verifiedRequest} />
 
 					{view === "demo" ? (
 						<>
@@ -376,7 +363,7 @@ export function SignetDemoPanel({
 									) : null}
 									{proof.replayed ? (
 										<p className="flex items-center gap-2 font-medium text-success">
-											<Check className="size-3.5" aria-hidden /> Exact retry replayed; no new order
+											<Check className="size-3.5" aria-hidden /> Exact retry replayed; no duplicate request
 										</p>
 									) : null}
 								</div>
@@ -391,7 +378,13 @@ export function SignetDemoPanel({
 									<Terminal className="size-3.5" aria-hidden /> Reproduce from the terminal
 								</p>
 								<pre className="overflow-x-auto whitespace-pre-wrap text-[11px] leading-5 text-muted-foreground">
-									<code>{`git clone https://github.com/signettai/signett\ncd signett && npm ci\nnpm run saleor:native-smoke\nnpm run saleor:oracle`}</code>
+									<code>{`npx signett agent \\
+  --url "$CHECKOUT_URL" \\
+  --prompt "${AGENT_PROMPT}" \\
+  --endpoint "$OPENAI_COMPATIBLE_ENDPOINT" \\
+  --model "$MODEL" \\
+  --api-key-env OPENAI_API_KEY \\
+  --output signett-saleor-evidence.json`}</code>
 								</pre>
 							</div>
 
@@ -467,7 +460,7 @@ export function SignetDemoPanel({
 								onClick={() => onApproval(true)}
 								type="button"
 							>
-								<Check className="size-4" aria-hidden /> Approve test order
+								<Check className="size-4" aria-hidden /> Submit request
 							</button>
 						</div>
 					</div>

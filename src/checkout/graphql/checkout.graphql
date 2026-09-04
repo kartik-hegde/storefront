@@ -38,6 +38,7 @@ fragment PaymentGatewayFragment on PaymentGateway {
 fragment CheckoutFragment on Checkout {
 	id
 	email
+	customerNote
 	discount {
 		...Money
 	}
@@ -220,6 +221,21 @@ mutation checkoutLineDelete($checkoutId: ID!, $lineId: ID, $languageCode: Langua
 
 mutation checkoutEmailUpdate($email: String!, $checkoutId: ID!, $languageCode: LanguageCodeEnum!) {
 	checkoutEmailUpdate(email: $email, id: $checkoutId) {
+		errors {
+			...CheckoutErrorFragment
+		}
+		checkout {
+			...CheckoutFragment
+		}
+	}
+}
+
+mutation checkoutCustomerNoteUpdate(
+	$checkoutId: ID!
+	$customerNote: String!
+	$languageCode: LanguageCodeEnum!
+) {
+	checkoutCustomerNoteUpdate(id: $checkoutId, customerNote: $customerNote) {
 		errors {
 			...CheckoutErrorFragment
 		}

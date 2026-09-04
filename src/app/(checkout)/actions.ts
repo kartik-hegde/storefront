@@ -8,6 +8,7 @@ import {
 	CheckoutCompleteDocument,
 	CheckoutCreateDocument,
 	CheckoutCustomerAttachDocument,
+	CheckoutCustomerNoteUpdateDocument,
 	CheckoutDeliveryMethodUpdateDocument,
 	CheckoutEmailUpdateDocument,
 	CheckoutMetadataUpdateDocument,
@@ -32,6 +33,8 @@ import {
 	type CheckoutCreateMutationVariables,
 	type CheckoutCustomerAttachMutation,
 	type CheckoutCustomerAttachMutationVariables,
+	type CheckoutCustomerNoteUpdateMutation,
+	type CheckoutCustomerNoteUpdateMutationVariables,
 	type CheckoutDeliveryMethodUpdateMutation,
 	type CheckoutDeliveryMethodUpdateMutationVariables,
 	type CheckoutEmailUpdateMutation,
@@ -109,6 +112,11 @@ const checkoutCustomerAttachDocument = toTypedDocument<
 	CheckoutCustomerAttachMutation,
 	CheckoutCustomerAttachMutationVariables
 >(CheckoutCustomerAttachDocument);
+
+const checkoutCustomerNoteUpdateDocument = toTypedDocument<
+	CheckoutCustomerNoteUpdateMutation,
+	CheckoutCustomerNoteUpdateMutationVariables
+>(CheckoutCustomerNoteUpdateDocument);
 
 const checkoutCreateDocument = toTypedDocument<CheckoutCreateMutation, CheckoutCreateMutationVariables>(
 	CheckoutCreateDocument,
@@ -197,6 +205,26 @@ export async function updateCheckoutEmail(checkoutId: string, email: string): Pr
 	}
 
 	return toCheckoutActionResult(result.data.checkoutEmailUpdate);
+}
+
+export async function updateCheckoutCustomerNote(
+	checkoutId: string,
+	customerNote: string,
+): Promise<CheckoutActionResult> {
+	const result = await executeAuthenticatedGraphQL(checkoutCustomerNoteUpdateDocument, {
+		variables: {
+			checkoutId,
+			customerNote,
+			languageCode: await checkoutGraphqlLanguageCode(),
+		},
+		cache: "no-cache",
+	});
+
+	if (!result.ok) {
+		return { ok: false, error: result.error.message };
+	}
+
+	return toCheckoutActionResult(result.data.checkoutCustomerNoteUpdate);
 }
 
 /** Persists guest marketing consent on checkout metadata for ORDER_CREATED webhooks / ESP apps. */

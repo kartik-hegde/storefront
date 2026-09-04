@@ -7,8 +7,6 @@ import { TraceAssembler, type InvocationTrace } from "signett/opentelemetry";
 import { useSignettActivity, useSignettTool } from "signett/react";
 import { IndexedDbIdempotencyStore } from "signett/stores";
 
-import { useCheckoutGatewayMessages } from "@/checkout/hooks/use-checkout-gateway-messages";
-import { navigateToOrderConfirmation } from "@/checkout/lib/payment/navigate-to-order";
 import { useCheckoutData } from "@/checkout/providers/checkout-data";
 
 import {
@@ -18,13 +16,12 @@ import {
 	ResponseLossSimulation,
 	type ResponseLossSimulationState,
 } from "./checkout-model";
-import { checkoutOperations, type CheckoutOrderProof } from "./checkout-operations";
+import { checkoutOperations, type CheckoutRequestProof } from "./checkout-operations";
 import { createCheckoutTools } from "./checkout-tools";
 import { type ApprovalRequest, SignetDemoPanel } from "./signet-demo-panel";
 
 export function SignetCheckoutTools() {
 	const { checkout, refreshCheckout, setCheckout } = useCheckoutData();
-	const gatewayMessages = useCheckoutGatewayMessages();
 	const checkoutState = useMemo(() => new CheckoutSnapshot(), []);
 	useEffect(() => checkoutState.update(checkout), [checkout, checkoutState]);
 
@@ -33,7 +30,7 @@ export function SignetCheckoutTools() {
 	const [approval, setApproval] = useState<ApprovalRequest | null>(null);
 	const [simulationState, setSimulationState] = useState<ResponseLossSimulationState>("ready");
 	const simulation = useMemo(() => new ResponseLossSimulation(), []);
-	const [verifiedOrder, setVerifiedOrder] = useState<CheckoutOrderProof | null>(null);
+	const [verifiedRequest, setVerifiedRequest] = useState<CheckoutRequestProof | null>(null);
 	const [traces, setTraces] = useState<readonly InvocationTrace[]>([]);
 	const traceAssembler = useMemo(() => new TraceAssembler({ maxInvocations: 12 }), []);
 	const updateSimulationState = useCallback(
@@ -105,23 +102,21 @@ export function SignetCheckoutTools() {
 					updateSimulationState("triggered");
 					return true;
 				},
-				onOrderAttemptFailed: () => {
+				onRequestAttemptFailed: () => {
 					if (simulation.read() !== "armed") return;
 					sessionStorage.removeItem(LOST_RESPONSE_FAULT);
 					updateSimulationState("ready");
 				},
 				refreshCheckout,
 				setCheckout,
-				gatewayMessages,
 				idempotencyStore,
 				operationJournal,
-				onVerifiedOrder: setVerifiedOrder,
+				onVerifiedRequest: setVerifiedRequest,
 				operations: checkoutOperations,
 				requestApproval,
 			}),
 		[
 			checkoutState,
-			gatewayMessages,
 			idempotencyStore,
 			operationJournal,
 			refreshCheckout,
@@ -137,9 +132,12 @@ export function SignetCheckoutTools() {
 		useSignettTool(signett, tools.contact, [tools.contact]),
 		useSignettTool(signett, tools.deliveryOptions, [tools.deliveryOptions]),
 		useSignettTool(signett, tools.delivery, [tools.delivery]),
-		useSignettTool(signett, tools.placeOrder, [tools.placeOrder]),
+		useSignettTool(signett, tools.submitRequest, [tools.submitRequest]),
 	];
-	const orderActivity = useSignettActivity(signett, { toolName: "place_order", maxInvocations: 5 });
+	const requestActivity = useSignettActivity(signett, {
+		toolName: "submit_purchase_request",
+		maxInvocations: 5,
+	});
 
 	const decideApproval = useCallback((confirmed: boolean) => {
 		setApproval((current) => {
@@ -164,18 +162,15 @@ export function SignetCheckoutTools() {
 	return (
 		<SignetDemoPanel
 			approval={approval}
-			activity={orderActivity.latest}
+			activity={requestActivity.latest}
 			events={events}
 			proof={proof}
 			registeredCount={registrations.filter(({ status }) => status === "registered").length}
 			simulationState={simulationState}
 			traces={traces}
-			verifiedOrder={verifiedOrder}
+			verifiedRequest={verifiedRequest}
 			onApproval={decideApproval}
 			onToggleSimulation={toggleSimulation}
-			onViewOrder={() => {
-				if (verifiedOrder) navigateToOrderConfirmation(verifiedOrder.orderId);
-			}}
 		/>
 	);
 }

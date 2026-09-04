@@ -44,7 +44,7 @@ export type DeliveryInput = {
 	deliveryId: string;
 };
 
-export type PlaceOrderInput = {
+export type SubmitRequestInput = {
 	operationId: string;
 	expectedTotalAmount: number;
 	expectedCurrency: string;

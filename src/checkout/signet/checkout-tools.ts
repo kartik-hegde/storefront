@@ -1,6 +1,6 @@
 import { ToolError, type IdempotencyStore, type OperationJournal, type SignettTool } from "signett";
 
-import type { CheckoutGatewayMessagesHook } from "@/checkout/hooks/use-checkout-gateway-messages";
+import type { ServerCheckout } from "@/checkout/lib/checkout-types";
 import { getCheckoutPayAmount, getCheckoutPayCurrency } from "@/checkout/lib/payment/checkout-pay-amount";
 import type { CheckoutDataContextValue } from "@/checkout/providers/checkout-data";
 
@@ -11,28 +11,30 @@ import {
 	type ContactInput,
 	type DeliveryInput,
 	nearlyEqual,
-	type PlaceOrderInput,
+	type SubmitRequestInput,
 	requireCheckout,
-	shippingAddressInput,
 	toAddressInput,
 } from "./checkout-model";
-import type { CheckoutOperations, CheckoutOrderProof } from "./checkout-operations";
+import type { CheckoutOperations, CheckoutRequestProof } from "./checkout-operations";
 
-type OrderResult = CheckoutOrderProof & { status: "placed" };
-type OrderCorrelation = { phase: "payment_started" } | { phase: "order_created"; orderId: string };
+type RequestResult = CheckoutRequestProof & { status: "submitted" };
+type RequestCorrelation = {
+	phase: "request_started" | "request_submitted";
+	checkoutId: string;
+	marker: string;
+};
 
 export type CheckoutToolDependencies = {
 	checkoutState: CheckoutSnapshot;
 	refreshCheckout: CheckoutDataContextValue["refreshCheckout"];
 	setCheckout: CheckoutDataContextValue["setCheckout"];
-	gatewayMessages: CheckoutGatewayMessagesHook;
 	idempotencyStore: IdempotencyStore;
 	operationJournal: OperationJournal;
 	operations: CheckoutOperations;
 	requestApproval(title: string, detail: string): Promise<boolean>;
 	consumeLostResponseFault(): boolean;
-	onOrderAttemptFailed?(): void;
-	onVerifiedOrder?(proof: CheckoutOrderProof): void;
+	onRequestAttemptFailed?(): void;
+	onVerifiedRequest?(proof: CheckoutRequestProof): void;
 };
 
 export type CheckoutToolSet = {
@@ -44,18 +46,17 @@ export type CheckoutToolSet = {
 		CheckoutContext
 	>;
 	delivery: SignettTool<DeliveryInput, CheckoutContext, CheckoutContext>;
-	placeOrder: SignettTool<PlaceOrderInput, OrderResult, CheckoutContext>;
+	submitRequest: SignettTool<SubmitRequestInput, RequestResult, CheckoutContext>;
 };
 
 export function createCheckoutTools(dependencies: CheckoutToolDependencies): CheckoutToolSet {
 	const {
 		checkoutState,
 		consumeLostResponseFault,
-		gatewayMessages,
 		idempotencyStore,
 		operationJournal,
-		onVerifiedOrder,
-		onOrderAttemptFailed,
+		onVerifiedRequest,
+		onRequestAttemptFailed,
 		operations,
 		refreshCheckout,
 		requestApproval,
@@ -230,11 +231,11 @@ export function createCheckoutTools(dependencies: CheckoutToolDependencies): Che
 		},
 	};
 
-	const placeOrder: CheckoutToolSet["placeOrder"] = {
-		name: "place_order",
-		title: "Place order",
+	const submitRequest: CheckoutToolSet["submitRequest"] = {
+		name: "submit_purchase_request",
+		title: "Submit purchase request",
 		description:
-			"Charge the configured local test-payment gateway and convert the active Saleor checkout into one order. First inspect the checkout and provide the exact expected total and currency. Requires explicit shopper approval.",
+			"Submit the active Saleor checkout as a purchase request for merchant review. First inspect the checkout and provide the exact expected total and currency. Generate one stable operationId internally and reuse it for retries; never ask the shopper to provide it. Requires explicit shopper approval.",
 		inputSchema: {
 			type: "object",
 			properties: {
@@ -242,7 +243,7 @@ export function createCheckoutTools(dependencies: CheckoutToolDependencies): Che
 					type: "string",
 					minLength: 8,
 					maxLength: 64,
-					description: "A stable unique ID for this exact order-placement intent; reuse it only for retries.",
+					description: "An agent-generated stable ID for this exact purchase request; reuse it for retries.",
 				},
 				expectedTotalAmount: {
 					type: "number",
@@ -265,21 +266,20 @@ export function createCheckoutTools(dependencies: CheckoutToolDependencies): Che
 			mode: "effect-only",
 			request: ({ input, context }) =>
 				requestApproval(
-					"Approve this test order?",
+					"Submit this purchase request?",
 					`${context.lineCount} item${context.lineCount === 1 ? "" : "s"} · ${input.expectedCurrency} ${input.expectedTotalAmount.toFixed(2)} · ${context.email ?? "guest checkout"}`,
 				),
 		},
 		idempotency: {
 			store: idempotencyStore,
-			key: placeOrderKey,
+			key: purchaseRequestKey,
 		},
 		journal: { store: operationJournal },
 		execute: async (input, { operation }) => {
 			let responseLossTriggered = false;
 			try {
-				const active = requireCheckout(checkoutState.read());
 				const fresh = await refreshCheckout({ updateState: false });
-				if (!fresh) throw new Error("Saleor could not refresh the checkout before payment.");
+				if (!fresh) throw new Error("Saleor could not refresh the checkout before submission.");
 
 				const amount = getCheckoutPayAmount(fresh);
 				const currency = getCheckoutPayCurrency(fresh);
@@ -290,96 +290,98 @@ export function createCheckoutTools(dependencies: CheckoutToolDependencies): Che
 					);
 				}
 
-				const billingAddress = shippingAddressInput(fresh);
-				if (!billingAddress) throw new Error("Set a shipping address before placing the order.");
+				if (!fresh.email) throw new Error("Set a contact email before submitting the request.");
+				if (!fresh.shippingAddress) throw new Error("Set a shipping address before submitting the request.");
 				if (!fresh.delivery && fresh.isShippingRequired) {
-					throw new Error("Select a delivery option before placing the order.");
+					throw new Error("Select a delivery option before submitting the request.");
 				}
 
-				const billingResult = await operations.updateBillingAddress({
-					checkoutId: active.id,
-					billingAddress,
-					saveAddress: false,
+				const marker = purchaseRequestMarker(input.operationId);
+				await operation?.write<RequestCorrelation>({
+					phase: "request_started",
+					checkoutId: fresh.id,
+					marker,
 				});
-				if (!billingResult.ok) {
-					throw new Error(billingResult.error ?? "Saleor rejected the billing address.");
+				const existingNote = fresh.customerNote.trim();
+				const customerNote = existingNote.includes(marker)
+					? existingNote
+					: [existingNote, marker].filter(Boolean).join("\n\n");
+				const result = await operations.updateCustomerNote(fresh.id, customerNote);
+				let committedCheckout: ServerCheckout | null = result.ok ? result.checkout : null;
+				if (!result.ok) {
+					const reconciled = await refreshCheckout({ updateState: false });
+					const reconciledProof = reconciled
+						? checkoutRequestProof(reconciled, input.operationId, marker)
+						: null;
+					if (reconciledProof && reconciled) {
+						committedCheckout = reconciled;
+					} else {
+						await operation?.remove();
+						throw new ToolError({
+							code: "purchase_request_failed",
+							message: result.error ?? "Saleor rejected the purchase request.",
+							retry: "after_repair",
+							repair: {
+								action: "refresh_state",
+								instruction:
+									"Refresh the checkout and reconcile the existing operation before retrying with the same operationId.",
+							},
+						});
+					}
 				}
+				if (!committedCheckout) throw new Error("Saleor returned no checkout after request submission.");
+				setCheckout(committedCheckout);
 
-				const paymentProvider = operations.resolvePaymentProvider(fresh.availablePaymentGateways);
-				await operation?.write<OrderCorrelation>({ phase: "payment_started" });
-				const paymentResult =
-					paymentProvider.type === "dummy" && paymentProvider.gateway.id === "mirumee.payments.dummy"
-						? await operations.executeLegacyDummyPayment(fresh.id, amount)
-						: await operations.executePayment(
-								paymentProvider,
-								{ checkoutId: fresh.id, amount },
-								gatewayMessages,
-							);
-				if (!paymentResult.ok) {
-					await operation?.remove();
-					throw new ToolError({
-						code: "payment_provider_unavailable",
-						message: paymentResult.error,
-						retry: "after_repair",
-						repair: {
-							action: "stop",
-							instruction:
-								"The Saleor payment provider rejected this attempt. Do not retry or request approval again until the provider is healthy.",
-						},
-					});
-				}
-
-				await operation?.write<OrderCorrelation>({
-					phase: "order_created",
-					orderId: paymentResult.orderId,
+				await operation?.write<RequestCorrelation>({
+					phase: "request_submitted",
+					checkoutId: fresh.id,
+					marker,
 				});
 				if (consumeLostResponseFault()) {
 					responseLossTriggered = true;
-					throw new Error("Injected lost response after Saleor committed the order.");
+					throw new Error("Injected lost response after Saleor committed the purchase request.");
 				}
 
-				const proof = await operations.getOrderProof(paymentResult.orderId);
-				if (!proof) throw new Error("The order response arrived but authoritative verification failed.");
-				return { ...proof, status: "placed" };
+				const proof = checkoutRequestProof(committedCheckout, input.operationId, marker);
+				if (!proof) throw new Error("The request response arrived but authoritative verification failed.");
+				return { ...proof, status: "submitted" };
 			} catch (error) {
-				if (!responseLossTriggered) onOrderAttemptFailed?.();
+				if (!responseLossTriggered) onRequestAttemptFailed?.();
 				throw error;
 			}
 		},
 		recover: async ({ operation }) => {
-			const correlation = await operation?.read<OrderCorrelation>();
+			const correlation = await operation?.read<RequestCorrelation>();
 			if (!correlation) return { recovered: false };
-			if (correlation.phase === "payment_started") {
-				return {
-					recovered: false,
-					outcome: "unknown",
-					reason: "Payment started, but no Saleor order ID was recorded.",
-				};
-			}
-			const proof = await operations.getOrderProof(correlation.orderId);
+			const fresh = await refreshCheckout({ updateState: false });
+			const requestId = correlation.marker.slice("[Signett purchase request ".length, -1);
+			const proof = fresh ? checkoutRequestProof(fresh, requestId, correlation.marker) : null;
+			if (proof && fresh) setCheckout(fresh);
 			return proof
-				? { recovered: true, output: { ...proof, status: "placed" } }
+				? { recovered: true, output: { ...proof, status: "submitted" } }
 				: {
 						recovered: false,
 						outcome: "unknown",
-						reason: "The correlated Saleor order could not be verified.",
+						reason: "The correlated Saleor purchase request could not be verified.",
 					};
 		},
 		verify: async ({ input, output, context }) => {
-			const proof = await operations.getOrderProof(output.orderId);
+			const fresh = await refreshCheckout({ updateState: false });
+			const marker = purchaseRequestMarker(input.operationId);
+			const proof = fresh ? checkoutRequestProof(fresh, input.operationId, marker) : null;
 			const verified =
-				proof?.isPaid === true &&
+				proof?.checkoutId === output.checkoutId &&
 				proof.email === context.email &&
 				proof.lineCount === context.lineCount &&
 				proof.currency === input.expectedCurrency &&
 				nearlyEqual(proof.totalAmount, input.expectedTotalAmount);
-			if (verified && proof) onVerifiedOrder?.(proof);
+			if (verified && proof) onVerifiedRequest?.(proof);
 			return verified;
 		},
 		outputBudgetBytes: 2048,
 	};
 
-	return { inspect, contact, deliveryOptions, delivery, placeOrder };
+	return { inspect, contact, deliveryOptions, delivery, submitRequest };
 }
 
 function requireActiveCheckout({ context }: { context: CheckoutContext }) {
@@ -389,8 +391,32 @@ function requireActiveCheckout({ context }: { context: CheckoutContext }) {
 	};
 }
 
-function placeOrderKey({ input, context }: { input: PlaceOrderInput; context: CheckoutContext }) {
-	return `${context.checkoutId}:${input.operationId}:place:${input.expectedCurrency}:${input.expectedTotalAmount.toFixed(2)}`;
+function purchaseRequestKey({ input, context }: { input: SubmitRequestInput; context: CheckoutContext }) {
+	return `${context.checkoutId}:${input.operationId}:request:${input.expectedCurrency}:${input.expectedTotalAmount.toFixed(2)}`;
+}
+
+function purchaseRequestMarker(operationId: string): string {
+	return `[Signett purchase request ${operationId}]`;
+}
+
+function checkoutRequestProof(
+	checkout: ServerCheckout,
+	requestId: string,
+	marker: string,
+): CheckoutRequestProof | null {
+	if (!checkout.customerNote.includes(marker) || !checkout.email) return null;
+	const totalAmount = getCheckoutPayAmount(checkout);
+	const currency = getCheckoutPayCurrency(checkout);
+	if (totalAmount === null || currency === null) return null;
+	return {
+		checkoutId: checkout.id,
+		requestId,
+		email: checkout.email,
+		lineCount: checkout.lines.reduce((total, line) => total + line.quantity, 0),
+		totalAmount,
+		currency,
+		deliveryName: checkout.delivery?.shippingMethod?.name ?? "No delivery required",
+	};
 }
 
 async function refreshAndAdopt(
