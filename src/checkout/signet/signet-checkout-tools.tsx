@@ -16,7 +16,7 @@ import {
 	ResponseLossSimulation,
 	type ResponseLossSimulationState,
 } from "./checkout-model";
-import { checkoutOperations, type CheckoutRequestProof } from "./checkout-operations";
+import { checkoutOperations } from "./checkout-operations";
 import { createCheckoutTools } from "./checkout-tools";
 import { type ApprovalRequest, SignetDemoPanel } from "./signet-demo-panel";
 
@@ -30,7 +30,6 @@ export function SignetCheckoutTools() {
 	const [approval, setApproval] = useState<ApprovalRequest | null>(null);
 	const [simulationState, setSimulationState] = useState<ResponseLossSimulationState>("ready");
 	const simulation = useMemo(() => new ResponseLossSimulation(), []);
-	const [verifiedRequest, setVerifiedRequest] = useState<CheckoutRequestProof | null>(null);
 	const [traces, setTraces] = useState<readonly InvocationTrace[]>([]);
 	const traceAssembler = useMemo(() => new TraceAssembler({ maxInvocations: 12 }), []);
 	const updateSimulationState = useCallback(
@@ -111,7 +110,6 @@ export function SignetCheckoutTools() {
 				setCheckout,
 				idempotencyStore,
 				operationJournal,
-				onVerifiedRequest: setVerifiedRequest,
 				operations: checkoutOperations,
 				requestApproval,
 			}),
@@ -168,7 +166,6 @@ export function SignetCheckoutTools() {
 			registeredCount={registrations.filter(({ status }) => status === "registered").length}
 			simulationState={simulationState}
 			traces={traces}
-			verifiedRequest={verifiedRequest}
 			onApproval={decideApproval}
 			onToggleSimulation={toggleSimulation}
 		/>

@@ -18,7 +18,6 @@ import {
 import { cn } from "@/lib/utils";
 
 import type { ResponseLossSimulationState } from "./checkout-model";
-import type { CheckoutRequestProof } from "./checkout-operations";
 import { SignettTelemetryView } from "./signet-telemetry-view";
 
 export type ApprovalRequest = {
@@ -35,7 +34,6 @@ type SignetDemoPanelProps = {
 	registeredCount: number;
 	simulationState: ResponseLossSimulationState;
 	traces: readonly InvocationTrace[];
-	verifiedRequest: CheckoutRequestProof | null;
 	onApproval(confirmed: boolean): void;
 	onToggleSimulation(): void;
 };
@@ -49,88 +47,80 @@ function eventTone(stage: GuardEvent["stage"]): string {
 	return "text-muted-foreground";
 }
 
-function ActivityState({
-	activity,
-	verifiedRequest,
-}: Pick<SignetDemoPanelProps, "activity" | "verifiedRequest">) {
+function formatDuration(durationMs: number): string {
+	return durationMs < 1000 ? `${Math.round(durationMs)}ms` : `${(durationMs / 1000).toFixed(1)}s`;
+}
+
+function ActivityState({ activity }: Pick<SignetDemoPanelProps, "activity">) {
 	const verified = activity?.phase === "succeeded" && activity.verified;
 	const status = (() => {
 		switch (activity?.phase) {
 			case "running":
 				return {
 					icon: <LoaderCircle className="size-4 animate-spin" aria-hidden />,
-					label: "Agent is working",
-					detail: "Signett is validating intent before the Saleor effect.",
+					label: "Running checkout tools…",
 					tone: "border-call text-foreground",
 				};
 			case "awaiting_confirmation":
 				return {
 					icon: <Clock3 className="size-4" aria-hidden />,
-					label: "Waiting for your approval",
-					detail: "No request is submitted until the visible confirmation is approved.",
+					label: "Approval required",
 					tone: "border-warning text-foreground",
 				};
 			case "verifying":
 				return {
 					icon: <LoaderCircle className="size-4 animate-spin" aria-hidden />,
-					label: "Verifying with Saleor",
-					detail: "The mutation returned; the UI is waiting for authoritative proof.",
+					label: "Verifying in Saleor…",
 					tone: "border-call text-foreground",
 				};
 			case "succeeded":
 				return verified
 					? {
 							icon: <Check className="size-4" aria-hidden />,
-							label: "Purchase request verified in Saleor",
-							detail: `${activity.resolution ?? "executed"} · ${activity.durationMs} ms · request ${verifiedRequest?.requestId ?? "confirmed"}`,
+							label: "Verified in Saleor",
+							detail: `${activity.resolution ?? "executed"} · ${formatDuration(activity.durationMs)}`,
 							tone: "border-success text-foreground",
 						}
 					: {
 							icon: <ShieldAlert className="size-4" aria-hidden />,
 							label: "Action finished without proof",
-							detail: "The storefront will not present this as a submitted request.",
 							tone: "border-warning text-foreground",
 						};
 			case "declined":
 				return {
 					icon: <CircleX className="size-4" aria-hidden />,
 					label: "Request declined",
-					detail: "Nothing was submitted and the checkout remains editable.",
 					tone: "border-border text-muted-foreground",
 				};
 			case "failed":
 				return {
 					icon: <CircleX className="size-4" aria-hidden />,
 					label: "Action failed safely",
-					detail: "The agent receives structured repair guidance for the next step.",
 					tone: "border-destructive text-foreground",
 				};
 			case "unknown":
 				return {
 					icon: <ShieldAlert className="size-4" aria-hidden />,
 					label: "Outcome unknown — do not retry blindly",
-					detail:
-						"Signett retains the internal operation ID so it can recover without duplicating the effect.",
 					tone: "border-warning text-foreground",
 				};
 			default:
 				return {
 					icon: <span className="mt-1 block size-2 rounded-full bg-call" aria-hidden />,
-					label: "Ready for the Signett Chrome Agent",
-					detail: "Add an item, open checkout, then give the agent the prompt below.",
+					label: "Ready for Signett",
 					tone: "border-call text-foreground",
 				};
 		}
 	})();
 
 	return (
-		<div className={cn("border-l-2 py-1 pl-3", status.tone)} aria-live="polite">
-			<div className="flex items-start gap-2.5">
-				<span className="mt-0.5">{status.icon}</span>
-				<div className="min-w-0 flex-1">
-					<p className="text-sm font-medium">{status.label}</p>
-					<p className="mt-1 text-xs leading-5 text-muted-foreground">{status.detail}</p>
-				</div>
+		<div className={cn("border-l-2 py-1.5 pl-3", status.tone)} aria-live="polite">
+			<div className="flex items-center gap-2.5">
+				<span>{status.icon}</span>
+				<p className="min-w-0 flex-1 truncate text-sm font-medium">{status.label}</p>
+				{"detail" in status && status.detail ? (
+					<span className="shrink-0 text-xs text-muted-foreground">{status.detail}</span>
+				) : null}
 			</div>
 		</div>
 	);
@@ -139,12 +129,11 @@ function ActivityState({
 const SIMULATION_STEPS: ReadonlyArray<{
 	state: ResponseLossSimulationState;
 	label: string;
-	detail: string;
 }> = [
-	{ state: "ready", label: "Ready", detail: "Normal request" },
-	{ state: "armed", label: "Armed", detail: "Next request" },
-	{ state: "triggered", label: "Triggered", detail: "Reply dropped" },
-	{ state: "recovered", label: "Recovered", detail: "Request verified" },
+	{ state: "ready", label: "Ready" },
+	{ state: "armed", label: "Armed" },
+	{ state: "triggered", label: "Lost" },
+	{ state: "recovered", label: "Recovered" },
 ];
 
 function ResponseLossSimulation({
@@ -166,45 +155,40 @@ function ResponseLossSimulation({
 	})();
 
 	return (
-		<section className="space-y-3 border-b border-border pb-5" aria-labelledby="response-loss-title">
-			<div>
+		<section className="space-y-3" aria-labelledby="response-loss-title">
+			<div className="flex items-center justify-between gap-3">
 				<h3 id="response-loss-title" className="text-xs font-medium text-foreground">
-					Post-commit recovery simulation
+					Lost-response recovery
 				</h3>
-				<p className="mt-1 text-[11px] leading-4 text-muted-foreground">
-					The next purchase request is saved in Saleor, but its browser response is intentionally dropped.
-				</p>
+				<span className="text-[10px] text-muted-foreground">one shot</span>
 			</div>
 
-			<ol className="grid grid-cols-4 border-y border-border py-3" aria-label="Simulation progress">
+			<ol className="flex items-center justify-between gap-2" aria-label="Simulation progress">
 				{SIMULATION_STEPS.map((step, index) => {
 					const complete = index < activeIndex || simulationState === "recovered";
 					const active = index === activeIndex;
 					return (
 						<li
-							className="min-w-0 px-1 text-center"
+							className="flex min-w-0 items-center gap-1.5"
 							key={step.state}
 							aria-current={active ? "step" : undefined}
 						>
 							<span
 								className={cn(
-									"mx-auto grid size-5 place-items-center rounded-full border font-mono text-[9px]",
+									"size-2 rounded-full border",
 									complete && "border-success bg-success text-primary-foreground",
-									active && !complete && "border-signal text-signal",
+									active && !complete && "border-signal bg-signal",
 									!active && !complete && "border-border text-muted-foreground",
 								)}
-							>
-								{complete ? <Check className="size-3" aria-hidden /> : index + 1}
-							</span>
+							/>
 							<p
 								className={cn(
-									"mt-1.5 truncate text-[10px] font-medium",
+									"truncate text-[10px] font-medium",
 									active ? "text-foreground" : "text-muted-foreground",
 								)}
 							>
 								{step.label}
 							</p>
-							<p className="mt-0.5 truncate text-[9px] text-muted-foreground">{step.detail}</p>
 						</li>
 					);
 				})}
@@ -243,7 +227,6 @@ export function SignetDemoPanel({
 	registeredCount,
 	simulationState,
 	traces,
-	verifiedRequest,
 	onApproval,
 	onToggleSimulation,
 }: SignetDemoPanelProps) {
@@ -313,27 +296,12 @@ export function SignetDemoPanel({
 					</nav>
 				</div>
 
-				<div className="space-y-5 p-5">
-					<ActivityState activity={activity} verifiedRequest={verifiedRequest} />
+				<div className="space-y-4 p-5">
+					<ActivityState activity={activity} />
 
 					{view === "demo" ? (
 						<>
-							<div className="grid grid-cols-3 divide-x divide-border border-y border-border text-xs">
-								{[
-									["01", "intent", "validated"],
-									["02", "effect", "idempotent"],
-									["03", "outcome", "verified"],
-								].map(([number, label, value]) => (
-									<div className="px-3 py-3" key={label}>
-										<p className="font-mono text-[9px] uppercase tracking-wider text-muted-foreground">
-											{number} {label}
-										</p>
-										<p className="mt-1 font-medium text-foreground">{value}</p>
-									</div>
-								))}
-							</div>
-
-							<div className="border-b border-border pb-5">
+							<div className="rounded-card border border-border p-3.5">
 								<div className="mb-2 flex items-center justify-between gap-3">
 									<p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
 										Chrome Agent prompt
@@ -346,7 +314,7 @@ export function SignetDemoPanel({
 										{copied ? "Copied" : "Copy"}
 									</button>
 								</div>
-								<p className="text-xs leading-5 text-muted-foreground">{AGENT_PROMPT}</p>
+								<p className="text-xs leading-5 text-foreground">{AGENT_PROMPT}</p>
 							</div>
 
 							<ResponseLossSimulation
