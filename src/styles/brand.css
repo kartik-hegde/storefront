@@ -50,6 +50,9 @@
 	--destructive-foreground: 0.98 0 0;
 	--success: 0.55 0.15 145;
 	--success-foreground: 0.98 0 0;
+	--warning: 0.727 0.1467 77.6; /* Signett replay / pending amber */
+	--signal: 0.6507 0.1836 39; /* Signett active-path orange */
+	--call: 0.5598 0.1882 266.4; /* Signett invocation blue */
 	--bestseller: 0.56 0.084 68; /* Bronze outline (~#8B6B3D) — bestseller badge */
 
 	/* --- Interactive --- */

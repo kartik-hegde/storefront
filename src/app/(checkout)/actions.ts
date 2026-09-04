@@ -8,6 +8,7 @@ import {
 	CheckoutCompleteDocument,
 	CheckoutCreateDocument,
 	CheckoutCustomerAttachDocument,
+	CheckoutCustomerNoteUpdateDocument,
 	CheckoutDeliveryMethodUpdateDocument,
 	CheckoutEmailUpdateDocument,
 	CheckoutMetadataUpdateDocument,
@@ -32,6 +33,8 @@ import {
 	type CheckoutCreateMutationVariables,
 	type CheckoutCustomerAttachMutation,
 	type CheckoutCustomerAttachMutationVariables,
+	type CheckoutCustomerNoteUpdateMutation,
+	type CheckoutCustomerNoteUpdateMutationVariables,
 	type CheckoutDeliveryMethodUpdateMutation,
 	type CheckoutDeliveryMethodUpdateMutationVariables,
 	type CheckoutEmailUpdateMutation,
@@ -80,6 +83,7 @@ import {
 import { getStripePaymentGuardError, isStripePaymentEnabled } from "@/checkout/lib/payment/providers/stripe";
 import { buildMarketingConsentMetadata } from "@/checkout/lib/marketing-consent";
 import { fetchCheckoutOnServer } from "@/checkout/lib/server/fetch-checkout";
+import { fetchOrderOnServer } from "@/checkout/lib/server/fetch-order";
 import { getCheckoutServerTranslations } from "@/checkout/lib/server/get-checkout-server-translations";
 import { toCheckoutActionResult } from "@/checkout/lib/server/mutation-result";
 import { toTypedDocument } from "@/checkout/lib/server/to-typed-document";
@@ -108,6 +112,11 @@ const checkoutCustomerAttachDocument = toTypedDocument<
 	CheckoutCustomerAttachMutation,
 	CheckoutCustomerAttachMutationVariables
 >(CheckoutCustomerAttachDocument);
+
+const checkoutCustomerNoteUpdateDocument = toTypedDocument<
+	CheckoutCustomerNoteUpdateMutation,
+	CheckoutCustomerNoteUpdateMutationVariables
+>(CheckoutCustomerNoteUpdateDocument);
 
 const checkoutCreateDocument = toTypedDocument<CheckoutCreateMutation, CheckoutCreateMutationVariables>(
 	CheckoutCreateDocument,
@@ -196,6 +205,26 @@ export async function updateCheckoutEmail(checkoutId: string, email: string): Pr
 	}
 
 	return toCheckoutActionResult(result.data.checkoutEmailUpdate);
+}
+
+export async function updateCheckoutCustomerNote(
+	checkoutId: string,
+	customerNote: string,
+): Promise<CheckoutActionResult> {
+	const result = await executeAuthenticatedGraphQL(checkoutCustomerNoteUpdateDocument, {
+		variables: {
+			checkoutId,
+			customerNote,
+			languageCode: await checkoutGraphqlLanguageCode(),
+		},
+		cache: "no-cache",
+	});
+
+	if (!result.ok) {
+		return { ok: false, error: result.error.message };
+	}
+
+	return toCheckoutActionResult(result.data.checkoutCustomerNoteUpdate);
 }
 
 /** Persists guest marketing consent on checkout metadata for ORDER_CREATED webhooks / ESP apps. */
@@ -607,6 +636,97 @@ export async function runCheckoutComplete(checkoutId: string): Promise<CheckoutC
 	});
 
 	return { ok: true, orderId };
+}
+
+/**
+ * Compatibility path for the legacy dummy-payment plugin shipped by the
+ * pinned local Saleor 3.23 stack. Newer Saleor installations use the
+ * transactionInitialize app flow handled by the normal storefront payment
+ * adapter. The gateway is intentionally fixed and the server re-reads the
+ * total before accepting the test payment.
+ */
+export async function executeSignetLegacyDummyPayment(
+	checkoutId: string,
+	expectedAmount: number,
+): Promise<CheckoutCompleteActionResult> {
+	if (!isDummyPaymentAllowed()) {
+		return { ok: false, error: "Test payment is not available in this environment." };
+	}
+
+	const live = await fetchCheckoutOnServer(checkoutId);
+	if (!live.ok || !live.checkout) {
+		return { ok: false, error: "Saleor could not verify the checkout before payment." };
+	}
+
+	const liveAmount = getCheckoutPayAmount(live.checkout);
+	if (liveAmount === null || hasMaterialCheckoutTotalChange(liveAmount, expectedAmount)) {
+		return { ok: false, error: "The checkout total changed before payment." };
+	}
+
+	type LegacyPaymentCreate = {
+		checkoutPaymentCreate?: {
+			errors: Array<{ field?: string | null; message?: string | null; code?: string | null }>;
+			payment?: { id: string } | null;
+		} | null;
+	};
+
+	const payment = await executeRawGraphQL<LegacyPaymentCreate>({
+		query: `mutation SignetLegacyPayment($id: ID!, $amount: PositiveDecimal!) {
+			checkoutPaymentCreate(
+				id: $id
+				input: { amount: $amount, gateway: "mirumee.payments.dummy", token: "dummy" }
+			) {
+				payment { id }
+				errors { field message code }
+			}
+		}`,
+		variables: { id: checkoutId, amount: expectedAmount },
+	});
+
+	if (!payment.ok) {
+		return { ok: false, error: payment.error.message };
+	}
+
+	const payload = payment.data.checkoutPaymentCreate;
+	if (!payload?.payment || payload.errors.length > 0) {
+		return {
+			ok: false,
+			error: payload?.errors[0]?.message ?? "Saleor rejected the legacy dummy payment.",
+		};
+	}
+
+	return runCheckoutComplete(checkoutId);
+}
+
+export type SignetOrderProof = {
+	orderId: string;
+	number: string;
+	email: string;
+	isPaid: boolean;
+	lineCount: number;
+	totalAmount: number;
+	currency: string;
+};
+
+/**
+ * Authoritative order read used by the Signet verification and recovery hooks.
+ * The browser never treats a mutation response as proof that checkout completed.
+ */
+export async function getSignetOrderProof(orderId: string): Promise<SignetOrderProof | null> {
+	const order = await fetchOrderOnServer(orderId);
+	if (!order) {
+		return null;
+	}
+
+	return {
+		orderId: order.id,
+		number: order.number,
+		email: order.userEmail ?? "",
+		isPaid: order.isPaid,
+		lineCount: order.lines.reduce((total, line) => total + line.quantity, 0),
+		totalAmount: order.total.gross.amount,
+		currency: order.total.gross.currency,
+	};
 }
 
 export async function getAddressValidationRules(

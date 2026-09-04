@@ -6,6 +6,7 @@ import { AnnouncementBarSkeleton } from "@/ui/sections/announcement-bar/announce
 import { ScrollToTopOnNavigate } from "@/ui/components/shared/scroll-to-top-on-navigate";
 import { AnnouncementBarSlot, CartDrawerSlot } from "./browse-chrome-slots";
 import { MainChrome } from "./main-chrome";
+import { SignettStorefrontTools } from "@/checkout/signet/signet-storefront-tools";
 
 // Define the title template here so it cascades to every browse page (products, search,
 // categories, …) — a plain-string title would not propagate the brand suffix to children.
@@ -18,6 +19,11 @@ type LayoutProps = {
 	children: ReactNode;
 	params: Promise<{ locale: string; channel: string }>;
 };
+
+async function SignettStorefrontToolsSlot({ params }: { params: LayoutProps["params"] }) {
+	const { channel, locale } = await params;
+	return <SignettStorefrontTools channel={channel} locale={locale} />;
+}
 
 export default function RootLayout({ children, params }: LayoutProps) {
 	return (
@@ -34,6 +40,9 @@ export default function RootLayout({ children, params }: LayoutProps) {
 				<AnnouncementBarSlot params={params} />
 			</Suspense>
 			<StorefrontProviders>
+				<Suspense fallback={null}>
+					<SignettStorefrontToolsSlot params={params} />
+				</Suspense>
 				<MainChrome params={params}>{children}</MainChrome>
 				<Suspense fallback={null}>
 					<CartDrawerSlot params={params} />

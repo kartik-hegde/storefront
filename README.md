@@ -1,3 +1,29 @@
+# Signett × Saleor: reliable agent purchase requests
+
+This branch is the live WebMCP challenge demo for [Signett](https://github.com/signettai/signett). It adds four catalog tools and five guarded checkout tools to Saleor's production-grade Paper storefront, then makes the application UI follow the verified tool lifecycle.
+
+The demo proves a narrow, falsifiable claim: a Chrome agent can prepare a real Saleor checkout and submit it as a merchant-review purchase request, with explicit approval, while an exact retry cannot duplicate the request. The durable effect is persisted on the live Saleor checkout; no payment or order is simulated.
+
+## Three-act judge flow
+
+1. **Agent workflow:** on the homepage, ask the Signett Chrome Agent: _“Find one inexpensive in-stock product, add exactly one to my cart, and begin checkout.”_ The agent composes `search_products`, `inspect_cart`, `add_to_cart`, and `begin_checkout` against live Saleor data.
+2. **Guarded effect:** in checkout, ask: _“Submit this checkout as a purchase request using the cheapest delivery option.”_ The agent composes the five checkout tools, generates its own stable operation ID, and the app requests visible confirmation before `submit_purchase_request` persists anything.
+3. **Failure and evidence:** arm **Simulate lost request response** before submission. The visible `Ready → Armed → Triggered → Recovered` progression shows Signett journal the committed effect and recover the authoritative Saleor state; an exact retry replays it instead of duplicating the request. Open **Telemetry** for the actual Signett-generated OTEL waterfall and copyable OTLP JSON; open **Developer proof** for the equivalent terminal test.
+
+The claim is deliberately stronger than “the agent found some WebMCP tools”: every effect is schema-validated, authorized, confirmed, idempotently claimed, recoverable after an ambiguous failure, and independently verified before the UI reports success. Telemetry is metadata-only; customer inputs are not exported.
+
+## Run locally
+
+```sh
+cp .env.signett.example .env.local
+pnpm install
+pnpm dev
+```
+
+The example environment targets Saleor's public showcase and enables its test-only dummy payment path. Use your own Saleor instance for durable testing.
+
+---
+
 [![Deploy with Vercel](https://vercel.com/button)](<https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fsaleor%2Fstorefront&env=NEXT_PUBLIC_SALEOR_API_URL%2CNEXT_PUBLIC_DEFAULT_CHANNEL%2CNEXT_PUBLIC_DEFAULT_LOCALE%2CNEXT_PUBLIC_STOREFRONT_LOCALES&envDescription=Your%20Saleor%20API%20URL%20is%20the%20GraphQL%20endpoint%20of%20your%20instance%20(e.g.%20https%3A%2F%2Fyour-instance.saleor.cloud%2Fgraphql%2F).%20The%20channel%20slug%20can%20be%20found%20in%20Saleor%20Dashboard%20under%20Configuration%20%3E%20Channels%20(e.g.%20default-channel).%20For%20multi-channel%2C%20set%20STOREFRONT_CHANNELS%20(e.g.%20us%2Cuk)%20and%20optionally%20SALEOR_APP_TOKEN%20for%20the%20footer%20selector.%20For%20locales%2C%20set%20NEXT_PUBLIC_DEFAULT_LOCALE%20(e.g.%20en)%20and%20NEXT_PUBLIC_STOREFRONT_LOCALES%20(e.g.%20en%2Cpl%2Cde%2Cfr%2Cfi%2Cnb).&envLink=https%3A%2F%2Fgithub.com%2Fsaleor%2Fstorefront%23environment-variables&project-name=my-saleor-storefront&repository-name=my-saleor-storefront&demo-title=Saleor%20Next.js%20Storefront&demo-description=Starter%20pack%20for%20building%20performant%20e-commerce%20experiences%20with%20Saleor.&demo-url=https%3A%2F%2Fstorefront.saleor.io%2F&demo-image=https%3A%2F%2Fstorefront-d5h86wzey-saleorcommerce.vercel.app%2Fopengraph-image.png%3F4db0ee8cf66e90af>)
 
 <img width="1920" height="1080" alt="saleor-storefront-paper-fin" src="https://github.com/user-attachments/assets/a8e37c20-35c8-42e0-a9c5-5c0b6097b921" />

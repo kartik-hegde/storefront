@@ -113,6 +113,12 @@ const config = {
 	async headers() {
 		const isDev = isDevelopment;
 		return [
+			{
+				// Native WebMCP is available only to origin-keyed documents. Make the
+				// requirement explicit for local previews and hosted challenge builds.
+				source: "/:path*",
+				headers: [{ key: "Origin-Agent-Cluster", value: "?1" }],
+			},
 			// In development, prevent aggressive caching of dynamic chunks
 			...(isDev
 				? [
