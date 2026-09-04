@@ -3,6 +3,7 @@
 import { useState, type FC } from "react";
 import { useSearchParams } from "next/navigation";
 
+import { updateCheckoutCustomerNote } from "@/app/(checkout)/actions";
 import { useCheckout } from "@/checkout/hooks/use-checkout";
 import { useCheckoutStep } from "@/checkout/hooks/use-checkout-step";
 import { useCheckoutStepFromUrl } from "@/checkout/hooks/use-checkout-step-from-url";
@@ -17,6 +18,8 @@ import { PaymentStep } from "./payment-step";
 import { useCheckoutTransition } from "@/checkout/hooks/use-checkout-transition";
 import { CheckoutSkeleton } from "./checkout-skeleton";
 import { PaymentCompletingScreen } from "./payment-completing-screen";
+import { readPurchaseRequestId, removePurchaseRequestMarkers } from "@/checkout/signet/checkout-model";
+import { PurchaseRequestSubmitted } from "@/checkout/signet/purchase-request-submitted";
 
 export const SaleorCheckout: FC = () => {
 	const searchParams = useSearchParams();
@@ -25,6 +28,8 @@ export const SaleorCheckout: FC = () => {
 	// RootViews shows PaymentCompletingScreen while `transition === "completing"` — keep this
 	// as defense-in-depth if SaleorCheckout is ever mounted outside RootViews.
 	const [isPaymentBusy, setIsPaymentBusy] = useState(false);
+	const [isResettingRequest, setIsResettingRequest] = useState(false);
+	const [requestResetError, setRequestResetError] = useState<string | null>(null);
 	const isPaymentFlowActive = transition === "completing";
 	const isCheckoutNavigationLocked = isPaymentFlowActive || isPaymentBusy;
 
@@ -55,6 +60,43 @@ export const SaleorCheckout: FC = () => {
 
 	if (!checkout) {
 		return <CheckoutSkeleton step={urlStep.index} isShippingRequired={isShippingRequired} />;
+	}
+
+	const purchaseRequestId =
+		process.env.NEXT_PUBLIC_SIGNETT_DEMO === "true" ? readPurchaseRequestId(checkout.customerNote) : null;
+
+	if (purchaseRequestId) {
+		const resetPurchaseRequest = async () => {
+			setIsResettingRequest(true);
+			setRequestResetError(null);
+			const result = await updateCheckoutCustomerNote(
+				checkout.id,
+				removePurchaseRequestMarkers(checkout.customerNote),
+			);
+			if (result.ok) {
+				setCheckout(result.checkout);
+			} else {
+				setRequestResetError(result.error ?? "Saleor could not prepare another demo.");
+			}
+			setIsResettingRequest(false);
+		};
+
+		return (
+			<CheckoutPageShell
+				step={checkoutSteps.length + 1}
+				completionLabel="Request submitted"
+				isShippingRequired={isShippingRequired}
+				storefrontChannel={checkout.channel.slug}
+			>
+				<PurchaseRequestSubmitted
+					checkout={checkout}
+					requestId={purchaseRequestId}
+					isResetting={isResettingRequest}
+					resetError={requestResetError}
+					onReset={() => void resetPurchaseRequest()}
+				/>
+			</CheckoutPageShell>
+		);
 	}
 
 	return (

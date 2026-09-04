@@ -3,6 +3,7 @@ import type { ServerCheckout } from "@/checkout/lib/checkout-types";
 import { getCheckoutPayAmount, getCheckoutPayCurrency } from "@/checkout/lib/payment/checkout-pay-amount";
 
 export const LOST_RESPONSE_FAULT = "saleor-signett:fault:lost-response";
+const PURCHASE_REQUEST_PREFIX = "[Signett purchase request ";
 
 export type ResponseLossSimulationState = "ready" | "armed" | "triggered" | "recovered";
 
@@ -49,6 +50,22 @@ export type SubmitRequestInput = {
 	expectedTotalAmount: number;
 	expectedCurrency: string;
 };
+
+export function purchaseRequestMarker(operationId: string): string {
+	return `${PURCHASE_REQUEST_PREFIX}${operationId}]`;
+}
+
+export function readPurchaseRequestId(customerNote: string): string | null {
+	let requestId: string | null = null;
+	for (const match of customerNote.matchAll(/\[Signett purchase request ([^\]\r\n]+)\]/g)) {
+		requestId = match[1] ?? null;
+	}
+	return requestId;
+}
+
+export function removePurchaseRequestMarkers(customerNote: string): string {
+	return customerNote.replace(/(?:^|\n{2})?\[Signett purchase request [^\]\r\n]+\](?=\n{2}|$)/g, "").trim();
+}
 
 export class CheckoutSnapshot {
 	#checkout: ServerCheckout | null = null;

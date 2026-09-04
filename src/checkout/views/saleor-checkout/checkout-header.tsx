@@ -10,6 +10,7 @@ import { StorefrontHomeLink } from "@/ui/components/shared/storefront-home-link"
 
 interface CheckoutHeaderProps {
 	step: number;
+	completionLabel?: string;
 	onStepClick?: (step: number) => void;
 	isShippingRequired?: boolean;
 	storefrontChannel?: string | null;
@@ -17,6 +18,7 @@ interface CheckoutHeaderProps {
 
 export function CheckoutHeader({
 	step,
+	completionLabel,
 	onStepClick,
 	isShippingRequired = true,
 	storefrontChannel,
@@ -29,6 +31,7 @@ export function CheckoutHeader({
 	}));
 
 	const totalSteps = steps.length;
+	const isComplete = Boolean(completionLabel) && step > totalSteps;
 
 	// Calculate progress percentage dynamically
 	const progressPercentage = Math.min((step / totalSteps) * 100, 100);
@@ -71,11 +74,19 @@ export function CheckoutHeader({
 										{s.label}
 									</span>
 								</button>
-								{i < steps.length - 1 && (
+								{(i < steps.length - 1 || isComplete) && (
 									<div className={cn("mx-4 h-px w-8", step > s.number ? "bg-foreground" : "bg-border")} />
 								)}
 							</div>
 						))}
+						{isComplete ? (
+							<div className="flex items-center gap-2" aria-current="step">
+								<span className="flex h-6 w-6 items-center justify-center rounded-full bg-success text-primary-foreground">
+									<Check className="h-3.5 w-3.5" />
+								</span>
+								<span className="text-sm font-medium text-foreground">{completionLabel}</span>
+							</div>
+						) : null}
 					</nav>
 
 					{/* Secure Badge */}
@@ -89,7 +100,7 @@ export function CheckoutHeader({
 				<div className="mt-3 md:hidden">
 					<div className="mb-2 flex items-center justify-between text-xs text-muted-foreground">
 						<span>{step > totalSteps ? t("complete") : t("stepOf", { step, total: totalSteps })}</span>
-						<span>{steps[step - 1]?.label}</span>
+						<span>{isComplete ? completionLabel : steps[step - 1]?.label}</span>
 					</div>
 					<div
 						className="h-1 overflow-hidden rounded-full bg-muted"

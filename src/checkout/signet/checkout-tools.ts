@@ -11,6 +11,8 @@ import {
 	type ContactInput,
 	type DeliveryInput,
 	nearlyEqual,
+	purchaseRequestMarker,
+	readPurchaseRequestId,
 	type SubmitRequestInput,
 	requireCheckout,
 	toAddressInput,
@@ -330,8 +332,6 @@ export function createCheckoutTools(dependencies: CheckoutToolDependencies): Che
 					}
 				}
 				if (!committedCheckout) throw new Error("Saleor returned no checkout after request submission.");
-				setCheckout(committedCheckout);
-
 				await operation?.write<RequestCorrelation>({
 					phase: "request_submitted",
 					checkoutId: fresh.id,
@@ -354,9 +354,9 @@ export function createCheckoutTools(dependencies: CheckoutToolDependencies): Che
 			const correlation = await operation?.read<RequestCorrelation>();
 			if (!correlation) return { recovered: false };
 			const fresh = await refreshCheckout({ updateState: false });
-			const requestId = correlation.marker.slice("[Signett purchase request ".length, -1);
+			const requestId = readPurchaseRequestId(correlation.marker);
+			if (!requestId) return { recovered: false };
 			const proof = fresh ? checkoutRequestProof(fresh, requestId, correlation.marker) : null;
-			if (proof && fresh) setCheckout(fresh);
 			return proof
 				? { recovered: true, output: { ...proof, status: "submitted" } }
 				: {
@@ -375,7 +375,10 @@ export function createCheckoutTools(dependencies: CheckoutToolDependencies): Che
 				proof.lineCount === context.lineCount &&
 				proof.currency === input.expectedCurrency &&
 				nearlyEqual(proof.totalAmount, input.expectedTotalAmount);
-			if (verified && proof) onVerifiedRequest?.(proof);
+			if (verified && proof && fresh) {
+				setCheckout(fresh);
+				onVerifiedRequest?.(proof);
+			}
 			return verified;
 		},
 		outputBudgetBytes: 2048,
@@ -393,10 +396,6 @@ function requireActiveCheckout({ context }: { context: CheckoutContext }) {
 
 function purchaseRequestKey({ input, context }: { input: SubmitRequestInput; context: CheckoutContext }) {
 	return `${context.checkoutId}:${input.operationId}:request:${input.expectedCurrency}:${input.expectedTotalAmount.toFixed(2)}`;
-}
-
-function purchaseRequestMarker(operationId: string): string {
-	return `[Signett purchase request ${operationId}]`;
 }
 
 function checkoutRequestProof(
