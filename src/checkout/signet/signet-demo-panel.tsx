@@ -8,9 +8,12 @@ import {
 	CircleAlert,
 	CircleX,
 	Clock3,
+	Database,
 	LoaderCircle,
+	SearchCheck,
 	ShieldAlert,
 	Terminal,
+	WifiOff,
 	X,
 	Zap,
 } from "lucide-react";
@@ -77,8 +80,11 @@ function ActivityState({ activity }: Pick<SignetDemoPanelProps, "activity">) {
 				return verified
 					? {
 							icon: <Check className="size-4" aria-hidden />,
-							label: "Verified in Saleor",
-							detail: `${activity.resolution ?? "executed"} · ${formatDuration(activity.durationMs)}`,
+							label:
+								activity.resolution === "recovered"
+									? "Recovered safely — no duplicate submission"
+									: "Verified in Saleor",
+							detail: `${activity.resolution === "recovered" ? "verified in Saleor" : (activity.resolution ?? "executed")} · ${formatDuration(activity.durationMs)}`,
 							tone: "border-success text-foreground",
 						}
 					: {
@@ -126,73 +132,95 @@ function ActivityState({ activity }: Pick<SignetDemoPanelProps, "activity">) {
 	);
 }
 
-const SIMULATION_STEPS: ReadonlyArray<{
-	state: ResponseLossSimulationState;
-	label: string;
-}> = [
-	{ state: "ready", label: "Ready" },
-	{ state: "armed", label: "Armed" },
-	{ state: "triggered", label: "Lost" },
-	{ state: "recovered", label: "Recovered" },
-];
-
 function ResponseLossSimulation({
 	simulationState,
 	onToggleSimulation,
 }: Pick<SignetDemoPanelProps, "simulationState" | "onToggleSimulation">) {
-	const activeIndex = SIMULATION_STEPS.findIndex(({ state }) => state === simulationState);
 	const control = (() => {
 		switch (simulationState) {
 			case "armed":
-				return { label: "Simulation armed", action: "Cancel", disabled: false };
+				return { label: "Post-commit timeout armed", action: "Cancel", disabled: false };
 			case "triggered":
-				return { label: "Recovering the committed request", action: "Working", disabled: true };
+				return { label: "Response interrupted — checking Saleor", action: "Working", disabled: true };
 			case "recovered":
-				return { label: "Response loss recovered", action: "Run again", disabled: false };
+				return { label: "Recovery complete", action: "Run again", disabled: false };
 			default:
-				return { label: "Simulate lost request response", action: "Arm", disabled: false };
+				return { label: "Simulate post-commit timeout", action: "Arm", disabled: false };
 		}
 	})();
+	const receipt = [
+		{
+			icon: Database,
+			label: "Effect saved in Saleor",
+			detail: "The purchase request marker was committed.",
+			complete: simulationState === "triggered" || simulationState === "recovered",
+		},
+		{
+			icon: WifiOff,
+			label: "Original response interrupted",
+			detail: "The tool received no success result from its execute path.",
+			complete: simulationState === "triggered" || simulationState === "recovered",
+		},
+		{
+			icon: SearchCheck,
+			label: "Original operation found",
+			detail: "Signett read the same operation back from Saleor.",
+			complete: simulationState === "recovered",
+		},
+		{
+			icon: Check,
+			label: "Outcome verified; UI released",
+			detail: "No second mutation or approval was needed.",
+			complete: simulationState === "recovered",
+		},
+	];
 
 	return (
 		<section className="space-y-3" aria-labelledby="response-loss-title">
 			<div className="flex items-center justify-between gap-3">
 				<h3 id="response-loss-title" className="text-xs font-medium text-foreground">
-					Lost-response recovery
+					Post-commit recovery
 				</h3>
-				<span className="text-[10px] text-muted-foreground">one shot</span>
+				<span className="text-[10px] text-muted-foreground">one-shot fault</span>
 			</div>
 
-			<ol className="flex items-center justify-between gap-2" aria-label="Simulation progress">
-				{SIMULATION_STEPS.map((step, index) => {
-					const complete = index < activeIndex || simulationState === "recovered";
-					const active = index === activeIndex;
-					return (
-						<li
-							className="flex min-w-0 items-center gap-1.5"
-							key={step.state}
-							aria-current={active ? "step" : undefined}
-						>
-							<span
-								className={cn(
-									"size-2 rounded-full border",
-									complete && "border-success bg-success text-primary-foreground",
-									active && !complete && "border-signal bg-signal",
-									!active && !complete && "border-border text-muted-foreground",
-								)}
-							/>
-							<p
-								className={cn(
-									"truncate text-[10px] font-medium",
-									active ? "text-foreground" : "text-muted-foreground",
-								)}
-							>
-								{step.label}
-							</p>
-						</li>
-					);
-				})}
-			</ol>
+			{simulationState === "armed" ? (
+				<div className="rounded-card border border-warning bg-muted px-3.5 py-3">
+					<p className="text-xs font-medium text-foreground">
+						The next submission will fail after Saleor saves it.
+					</p>
+					<p className="mt-1 text-[11px] leading-4 text-muted-foreground">
+						Signett must prove the existing effect instead of submitting again.
+					</p>
+				</div>
+			) : null}
+
+			{simulationState === "triggered" || simulationState === "recovered" ? (
+				<ol
+					className="divide-y divide-border rounded-card border border-border"
+					aria-label="Recovery receipt"
+				>
+					{receipt.map((step) => {
+						const Icon = step.icon;
+						return (
+							<li className="flex items-start gap-3 px-3.5 py-2.5" key={step.label}>
+								<span
+									className={cn(
+										"mt-0.5 grid size-5 shrink-0 place-items-center rounded-full border",
+										step.complete ? "border-success text-success" : "border-border text-muted-foreground",
+									)}
+								>
+									<Icon className={cn("size-3", !step.complete && "animate-pulse")} aria-hidden />
+								</span>
+								<div className="min-w-0">
+									<p className="text-xs font-medium text-foreground">{step.label}</p>
+									<p className="mt-0.5 text-[10px] leading-4 text-muted-foreground">{step.detail}</p>
+								</div>
+							</li>
+						);
+					})}
+				</ol>
+			) : null}
 
 			<button
 				className={cn(
@@ -243,7 +271,10 @@ export function SignetDemoPanel({
 	return (
 		<>
 			<aside
-				className="fixed bottom-4 right-4 z-50 max-h-[calc(100vh-2rem)] w-[min(28rem,calc(100vw-2rem))] overflow-y-auto rounded-lg border border-border bg-card shadow-elevated"
+				className={cn(
+					"fixed bottom-4 right-4 z-50 max-h-[calc(100vh-2rem)] overflow-y-auto rounded-lg border border-border bg-card shadow-elevated transition-[width] duration-base ease-standard",
+					view === "telemetry" ? "w-[min(46rem,calc(100vw-2rem))]" : "w-[min(28rem,calc(100vw-2rem))]",
+				)}
 				data-testid="signet-demo-panel"
 			>
 				<div className="sticky top-0 z-10 border-b border-border bg-card px-5 pt-4 text-foreground">
